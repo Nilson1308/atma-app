@@ -1,0 +1,60 @@
+# Definição dos nossos serviços (contêineres)
+services:
+  # Serviço do Backend (Django)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: atma_backend
+    # Comando para iniciar o servidor de desenvolvimento do Django
+    command: python manage.py runserver 0.0.0.0:8000
+    # Mapeia a pasta 'backend' local para a pasta '/app' dentro do contêiner
+    volumes:
+      - ./backend:/app
+    # Mapeia a porta 8000 do contêiner para a porta 8000 da sua máquina
+    ports:
+      - "8000:8000"
+    # Carrega as variáveis de ambiente do arquivo .env
+    env_file:
+      - ./.env
+    # Garante que o serviço de banco de dados (db) inicie antes do backend
+    depends_on:
+      - db
+
+  # Serviço do Frontend (Vue/Quasar)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: atma_frontend
+    # Comando para iniciar o servidor de desenvolvimento do Quasar
+    command: quasar dev
+    # Mapeia a pasta 'frontend' local para a pasta '/app' dentro do contêiner
+    volumes:
+      - ./frontend:/app
+      # Evita que a node_modules local sobrescreva a do contêiner
+      - /app/node_modules
+    # Mapeia a porta 9000 do contêiner para a porta 9000 da sua máquina
+    ports:
+      - "9000:9000"
+    # Garante que o backend inicie antes do frontend
+    depends_on:
+      - backend
+
+  # Serviço do Banco de Dados (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: atma_db
+    # Mapeia um volume para persistir os dados do banco de dados
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    # Carrega as variáveis de ambiente para configurar o banco de dados
+    env_file:
+      - ./.env
+    # Mapeia a porta 5432 do contêiner para a porta 5432 da sua máquina
+    ports:
+      - "5432:5432"
+
+# Definição dos volumes
+volumes:
+  postgres_data:

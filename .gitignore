@@ -1,0 +1,19 @@
+Arquivos de ambiente - NUNCA comitar senhas!
+.env
+
+Dependências do Python (Backend)
+pycache/
+*.pyc
+venv/
+env/
+
+Dependências do Node.js (Frontend)
+node_modules/
+dist/
+.quasar/
+
+Arquivos de IDE e Sistema Operacional
+.vscode/
+.idea/
+*.swp
+.DS_Store
