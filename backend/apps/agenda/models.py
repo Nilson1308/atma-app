@@ -1,6 +1,7 @@
 from django.db import models
-# Removido: from apps.users.models import Paciente, Profissional
-# Removido: from apps.financas.models import Servico
+from apps.users.models import Profissional, Paciente
+from apps.financas.models import Servico
+import uuid
 
 class Agendamento(models.Model):
     """
@@ -40,6 +41,8 @@ class Agendamento(models.Model):
     data_hora_fim = models.DateTimeField()
     notas_agendamento = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Agendado')
+    lembrete_enviado = models.BooleanField(default=False)
+    token_confirmacao = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
 
     # Timestamps
     criado_em = models.DateTimeField(auto_now_add=True)

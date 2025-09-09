@@ -82,7 +82,7 @@
                 <q-item-label caption>{{ new Date(agendamento.data_hora_inicio).toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) }}</q-item-label>
               </q-item-section>
               <q-item-section side>
-                <q-badge :color="getStatusColor(agendamento.status)" :label="agendamento.status" />
+                <q-badge :color="getStatusColorAgendamento(agendamento.status)" :label="agendamento.status" />
               </q-item-section>
             </q-item>
              <q-item v-if="!agendamentosPaciente.length && !loading">
@@ -116,10 +116,24 @@
           </q-list>
         </q-tab-panel>
 
-        <!-- Painel de Finanças (Placeholder) -->
+        <!-- Painel de Finanças (SIMPLIFICADO) -->
         <q-tab-panel name="financas">
-           <div class="text-h6">Histórico Financeiro</div>
-          <p>Em breve: uma lista com todas as transações (pagas e pendentes) deste paciente.</p>
+          <div class="text-h6 q-mb-md">Histórico Financeiro</div>
+           <q-table
+            :rows="transacoesPaciente"
+            :columns="colunasFinancas"
+            row-key="id"
+            :loading="loading"
+            flat
+          >
+            <template v-slot:body-cell-status="props">
+              <q-td :props="props">
+                <q-chip :color="getStatusColorTransacao(props.row.status)" text-color="white" dense square>
+                  {{ props.row.status.charAt(0).toUpperCase() + props.row.status.slice(1) }}
+                </q-chip>
+              </q-td>
+            </template>
+          </q-table>
         </q-tab-panel>
 
         <!-- Painel de Dados Cadastrais -->
@@ -129,7 +143,7 @@
       </q-tab-panels>
     </q-card>
 
-    <!-- Diálogo para Upload de Documento -->
+    <!-- Diálogos para Documento e Prontuário (sem alteração) -->
     <q-dialog v-model="dialogDocumentoVisivel" @hide="resetFormDocumento">
       <q-card style="width: 500px; max-width: 90vw;">
         <q-card-section>
@@ -164,7 +178,6 @@
       </q-card>
     </q-dialog>
 
-    <!-- Diálogo para Nova Entrada/Edição no Prontuário -->
     <q-dialog v-model="dialogEntradaVisivel">
       <q-card style="width: 600px; max-width: 90vw;">
         <q-card-section>
@@ -191,7 +204,6 @@
         </q-form>
       </q-card>
     </q-dialog>
-
   </q-page>
 </template>
 
@@ -199,27 +211,24 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from 'boot/axios'
-import { Notify, Dialog } from 'quasar'
+import { Notify, Dialog, date } from 'quasar'
 import PacienteForm from 'src/components/PacienteForm.vue'
 
+// Estado geral da página
 const route = useRoute()
+const pacienteId = route.params.id
 const paciente = ref(null)
 const prontuario = ref([])
 const agendamentosPaciente = ref([])
 const documentos = ref([])
+const transacoesPaciente = ref([])
 const loading = ref(true)
 const salvando = ref(false)
 const abaAtual = ref('prontuario')
-const pacienteId = route.params.id
 
-// Estados para o formulário de documento
+// Estados para formulários
 const dialogDocumentoVisivel = ref(false)
-const formDocumento = ref({
-  descricao: '',
-  arquivo: null
-})
-
-// Estados para o formulário de prontuário
+const formDocumento = ref({ descricao: '', arquivo: null })
 const dialogEntradaVisivel = ref(false)
 const textoEvolucao = ref('')
 const entradaEmEdicao = ref(null)
@@ -234,19 +243,31 @@ const opcoesAgendamento = computed(() => {
     }))
 })
 
+// Definição das colunas para a tabela de finanças (SIMPLIFICADA)
+const colunasFinancas = [
+  { name: 'data_transacao', label: 'Data', field: 'data_transacao', format: val => date.formatDate(val, 'DD/MM/YYYY'), sortable: true, align: 'left' },
+  { name: 'servico', label: 'Serviço', field: row => row.servico_prestado.nome_servico, sortable: true, align: 'left' },
+  { name: 'valor', label: 'Valor', field: 'valor_cobrado', format: val => parseFloat(val).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), sortable: true, align: 'right' },
+  { name: 'status', label: 'Status', field: 'status', sortable: true, align: 'center' }
+  // A coluna 'Ações' foi removida
+]
+
+// Função principal para buscar todos os dados da página
 async function buscarDados() {
   loading.value = true
   try {
-    const [pacienteResponse, prontuarioResponse, agendamentosResponse, documentosResponse] = await Promise.all([
+    const [pacienteResponse, prontuarioResponse, agendamentosResponse, documentosResponse, transacoesResponse] = await Promise.all([
       api.get(`/pacientes/${pacienteId}/`),
       api.get(`/pacientes/${pacienteId}/prontuario/`),
       api.get(`/pacientes/${pacienteId}/agendamentos/`),
-      api.get(`/pacientes/${pacienteId}/documentos/`)
+      api.get(`/pacientes/${pacienteId}/documentos/`),
+      api.get(`/pacientes/${pacienteId}/transacoes/`)
     ]);
     paciente.value = pacienteResponse.data
     prontuario.value = prontuarioResponse.data
     agendamentosPaciente.value = agendamentosResponse.data
     documentos.value = documentosResponse.data
+    transacoesPaciente.value = transacoesResponse.data
   } catch (error) {
     console.error('Erro ao buscar dados do paciente:', error)
     Notify.create({ color: 'negative', message: 'Falha ao carregar dados do paciente.' })
@@ -255,9 +276,9 @@ async function buscarDados() {
   }
 }
 
+// Funções para Documentos
 function resetFormDocumento() {
-  formDocumento.value.descricao = ''
-  formDocumento.value.arquivo = null
+  formDocumento.value = { descricao: '', arquivo: null }
 }
 
 async function salvarDocumento() {
@@ -266,11 +287,9 @@ async function salvarDocumento() {
     const formData = new FormData()
     formData.append('descricao', formDocumento.value.descricao)
     formData.append('arquivo', formDocumento.value.arquivo)
-
     await api.post(`/pacientes/${pacienteId}/documentos/`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
-
     Notify.create({ color: 'positive', message: 'Documento salvo com sucesso!' })
     dialogDocumentoVisivel.value = false
     await buscarDados()
@@ -300,11 +319,7 @@ function confirmarExcluirDocumento(doc) {
   })
 }
 
-function getStatusColor(status) {
-  const cores = { 'Agendado': 'blue', 'Confirmado': 'green', 'Realizado': 'positive', 'Cancelado': 'red', 'Não Compareceu': 'orange' }
-  return cores[status] || 'grey'
-}
-
+// Funções para Prontuário
 function getAgendamentoById(id) {
   return agendamentosPaciente.value.find(ag => ag.id === id)
 }
@@ -324,28 +339,23 @@ function abrirDialogEditarEntrada(entrada) {
 }
 
 async function salvarEntrada() {
-  if (!textoEvolucao.value) {
-    Notify.create({ color: 'warning', message: 'O campo de evolução não pode estar vazio.' })
-    return
-  }
   salvando.value = true
+  const payload = {
+    evolucao: textoEvolucao.value,
+    agendamento_associado: agendamentoVinculado.value
+  }
   try {
-    const payload = {
-      evolucao: textoEvolucao.value,
-      agendamento_associado: agendamentoVinculado.value
-    }
     if (entradaEmEdicao.value) {
       await api.put(`/pacientes/${pacienteId}/prontuario/${entradaEmEdicao.value.id}/`, payload)
-      Notify.create({ color: 'positive', message: 'Entrada atualizada com sucesso!' })
     } else {
       await api.post(`/pacientes/${pacienteId}/prontuario/`, payload)
-      Notify.create({ color: 'positive', message: 'Nova entrada salva com sucesso!' })
     }
+    Notify.create({ color: 'positive', message: 'Entrada do prontuário salva com sucesso!' })
     dialogEntradaVisivel.value = false
     await buscarDados()
   } catch (error) {
     console.error('Erro ao salvar entrada:', error)
-    Notify.create({ color: 'negative', message: 'Erro ao salvar a entrada.' })
+    Notify.create({ color: 'negative', message: 'Erro ao salvar entrada.' })
   } finally {
     salvando.value = false
   }
@@ -354,7 +364,7 @@ async function salvarEntrada() {
 function confirmarExcluirEntrada(entrada) {
   Dialog.create({
     title: 'Confirmar Exclusão',
-    message: 'Tem certeza que deseja excluir esta entrada do prontuário? Esta ação não pode ser desfeita.',
+    message: `Tem certeza que deseja excluir esta entrada do prontuário?`,
     cancel: true,
     persistent: true
   }).onOk(async () => {
@@ -364,12 +374,24 @@ function confirmarExcluirEntrada(entrada) {
       await buscarDados()
     } catch (error) {
       console.error('Erro ao excluir entrada:', error)
-      Notify.create({ color: 'negative', message: 'Erro ao excluir a entrada.' })
+      Notify.create({ color: 'negative', message: 'Erro ao excluir entrada.' })
     }
   })
+}
+
+// Funções Utilitárias de Cores
+function getStatusColorAgendamento(status) {
+  const cores = { 'Agendado': 'blue', 'Confirmado': 'green', 'Realizado': 'positive', 'Cancelado': 'red', 'Não Compareceu': 'orange' }
+  return cores[status] || 'grey'
+}
+
+const getStatusColorTransacao = (status) => {
+  const cores = { 'pendente': 'warning', 'pago': 'positive', 'cancelado': 'negative' }
+  return cores[status] || 'grey'
 }
 
 onMounted(() => {
   buscarDados()
 })
 </script>
+

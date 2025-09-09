@@ -31,7 +31,7 @@ class Transacao(models.Model):
     paciente = models.ForeignKey(Paciente, on_delete=models.PROTECT, related_name='transacoes')
     agendamento = models.ForeignKey('agenda.Agendamento', on_delete=models.SET_NULL, null=True, blank=True, related_name='transacao')
     servico_prestado = models.ForeignKey(Servico, on_delete=models.PROTECT, related_name='transacoes')
-    data_transacao = models.DateField(default=timezone.now, help_text="Data de competência da transação")
+    data_transacao = models.DateField(default=timezone.localdate, help_text="Data de competência da transação")
     valor_cobrado = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendente')
     metodo_pagamento = models.CharField(max_length=50, choices=METODO_CHOICES, blank=True, null=True)

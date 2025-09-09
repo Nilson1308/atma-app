@@ -1,54 +1,89 @@
 <template>
   <q-form @submit.prevent="submitForm">
     <q-card-section>
-      <q-input
-        label="Nome Completo *"
-        v-model="formData.nome_completo"
-        dense
-        outlined
-        :rules="[val => !!val || 'Campo obrigatório']"
-      />
-      <q-input
-        class="q-mt-md"
-        label="CPF"
-        v-model="formData.cpf"
-        dense
-        outlined
-        mask="###.###.###-##"
-      />
-      <q-input
-        class="q-mt-md"
-        label="Data de Nascimento"
-        v-model="formData.data_nascimento"
-        dense
-        outlined
-        mask="##/##/####"
-        placeholder="DD/MM/AAAA"
-      />
-      <q-input
-        class="q-mt-md"
-        label="Telefone"
-        v-model="formData.contato_telefone"
-        dense
-        outlined
-        mask="(##) #####-####"
-      />
-      <q-input
-        class="q-mt-md"
-        label="Email"
-        v-model="formData.email"
-        type="email"
-        dense
-        outlined
-      />
-       <q-input
-        class="q-mt-md"
-        label="Endereço"
-        v-model="formData.endereco"
-        type="textarea"
-        dense
-        outlined
-      />
+      <div class="row q-col-gutter-md">
+        <div class="col-12">
+          <q-input
+            label="Nome Completo *"
+            v-model="formData.nome_completo"
+            dense
+            outlined
+            :rules="[val => !!val || 'Campo obrigatório']"
+          />
+        </div>
+        <div class="col-12 col-sm-6">
+          <q-input
+            label="CPF"
+            v-model="formData.cpf"
+            dense
+            outlined
+            mask="###.###.###-##"
+          />
+        </div>
+        <div class="col-12 col-sm-6">
+          <q-input
+            label="Data de Nascimento"
+            v-model="formData.data_nascimento"
+            dense
+            outlined
+            mask="##/##/####"
+            placeholder="DD/MM/AAAA"
+          >
+            <template v-slot:append>
+              <q-icon name="event" class="cursor-pointer">
+                <q-popup-proxy cover transition-show="scale" transition-hide="scale">
+                  <q-date v-model="formData.data_nascimento" mask="DD/MM/YYYY">
+                    <div class="row items-center justify-end">
+                      <q-btn v-close-popup label="Fechar" color="primary" flat />
+                    </div>
+                  </q-date>
+                </q-popup-proxy>
+              </q-icon>
+            </template>
+          </q-input>
+        </div>
+        <div class="col-12 col-sm-6">
+          <q-input
+            label="Telefone"
+            v-model="formData.contato_telefone"
+            dense
+            outlined
+            mask="(##) #####-####"
+          />
+        </div>
+        <div class="col-12 col-sm-6">
+          <q-input
+            label="Email"
+            v-model="formData.email"
+            type="email"
+            dense
+            outlined
+          />
+        </div>
+        <div class="col-12">
+          <q-input
+            label="Endereço"
+            v-model="formData.endereco"
+            type="textarea"
+            dense
+            outlined
+          />
+        </div>
+
+        <div class="col-12">
+          <q-input
+            label="Dia de Cobrança Mensal"
+            v-model.number="formData.dia_cobranca"
+            type="number"
+            dense
+            outlined
+            hint="Deixe em branco para cobrança imediata após cada consulta."
+            :rules="[
+              val => (val >= 1 && val <= 31) || !val || 'O dia deve ser entre 1 e 31'
+            ]"
+          />
+        </div>
+      </div>
     </q-card-section>
 
     <q-card-actions align="right">
@@ -66,7 +101,7 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
 import { api } from 'boot/axios'
-import { Notify } from 'quasar' // <-- MUDANÇA 1: Importa o Notify diretamente
+import { Notify, date } from 'quasar'
 
 const props = defineProps({
   paciente: {
@@ -77,7 +112,6 @@ const props = defineProps({
 
 const emit = defineEmits(['pacienteSalvo'])
 
-// const $q = useQuasar() // Removido
 const loading = ref(false)
 const formData = ref({
   nome_completo: '',
@@ -86,30 +120,42 @@ const formData = ref({
   contato_telefone: '',
   email: '',
   endereco: '',
+  dia_cobranca: null // <-- NOVO CAMPO
 })
 
 const isEditing = computed(() => !!props.paciente)
 
+// Zera os dados do formulário
+function resetForm() {
+  formData.value = {
+    nome_completo: '',
+    cpf: '',
+    data_nascimento: '',
+    contato_telefone: '',
+    email: '',
+    endereco: '',
+    dia_cobranca: null // <-- NOVO CAMPO
+  }
+}
+
 watch(() => props.paciente, (newVal) => {
   if (newVal) {
     formData.value = { ...newVal }
+    // Converte a data do formato AAAA-MM-DD para DD/MM/AAAA
     if (formData.value.data_nascimento) {
-      const parts = formData.value.data_nascimento.split('-')
-      formData.value.data_nascimento = `${parts[2]}/${parts[1]}/${parts[0]}`
+      const formattedDate = date.formatDate(formData.value.data_nascimento, 'DD/MM/YYYY')
+      formData.value.data_nascimento = formattedDate
     }
   } else {
-    formData.value = { nome_completo: '', cpf: '', data_nascimento: '', contato_telefone: '', email: '', endereco: '' }
+    resetForm()
   }
 }, { immediate: true })
 
 
 function formatDataForAPI(data) {
-  if (!data) return null
-  const parts = data.split('/')
-  if (parts.length === 3) {
-    return `${parts[2]}-${parts[1]}-${parts[0]}`
-  }
-  return data
+  if (!data || !/^\d{2}\/\d{2}\/\d{4}$/.test(data)) return null
+  // Converte a data do formato DD/MM/AAAA para AAAA-MM-DD
+  return date.formatDate(data, 'YYYY-MM-DD')
 }
 
 async function submitForm() {
@@ -117,22 +163,21 @@ async function submitForm() {
   try {
     const dataToSend = {
       ...formData.value,
-      data_nascimento: formatDataForAPI(formData.value.data_nascimento)
+      data_nascimento: formatDataForAPI(formData.value.data_nascimento),
+      // Garante que o valor seja nulo se o campo estiver vazio
+      dia_cobranca: formData.value.dia_cobranca || null
     }
 
     if (isEditing.value) {
       await api.put(`/pacientes/${props.paciente.id}/`, dataToSend)
-      // MUDANÇA 2: Usa Notify.create
       Notify.create({ color: 'positive', message: 'Paciente atualizado com sucesso!' })
     } else {
       await api.post('/pacientes/', dataToSend)
-      // MUDANÇA 2: Usa Notify.create
       Notify.create({ color: 'positive', message: 'Paciente criado com sucesso!' })
     }
     emit('pacienteSalvo')
   } catch (error) {
     console.error('Erro ao salvar paciente:', error)
-    // MUDANÇA 2: Usa Notify.create
     Notify.create({ color: 'negative', message: 'Erro ao salvar paciente.' })
   } finally {
     loading.value = false

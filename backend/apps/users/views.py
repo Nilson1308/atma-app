@@ -1,6 +1,15 @@
 from rest_framework import viewsets, permissions, filters
 from .models import Profissional, Paciente
 from .serializers import ProfissionalSerializer, PacienteSerializer
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.utils import timezone
+from datetime import timedelta
+from django.db.models import Sum
+from apps.agenda.models import Agendamento
+from apps.agenda.serializers import AgendamentoSerializer
+from apps.financas.models import Transacao
+from apps.users.serializers import PacienteSerializerSimple
 
 class ProfissionalViewSet(viewsets.ModelViewSet):
     """
@@ -35,3 +44,57 @@ class PacienteViewSet(viewsets.ModelViewSet):
         # Salva o novo paciente, definindo o campo 'cadastrado_por' como o usuário atual.
         serializer.save(cadastrado_por=self.request.user)
 
+class DashboardDataView(APIView):
+    """
+    View para agregar e fornecer todos os dados necessários para o dashboard.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        profissional = request.user
+        hoje = timezone.localdate()
+        proximos_7_dias = hoje + timedelta(days=7)
+
+        # 1. Próximos Agendamentos
+        agendamentos_hoje = Agendamento.objects.filter(
+            profissional=profissional,
+            data_hora_inicio__date=hoje,
+            status__in=['Agendado', 'Confirmado']
+        ).order_by('data_hora_inicio')
+
+        agendamentos_futuros = Agendamento.objects.filter(
+            profissional=profissional,
+            data_hora_inicio__date__gt=hoje,
+            data_hora_inicio__date__lte=proximos_7_dias,
+            status__in=['Agendado', 'Confirmado']
+        ).order_by('data_hora_inicio')[:5] # Limita a 5 para não poluir o dashboard
+
+        # 2. Total de Pagamentos Pendentes
+        total_pendente_query = Transacao.objects.filter(
+            profissional=profissional,
+            status='pendente'
+        ).aggregate(total=Sum('valor_cobrado'))
+        total_pendente = total_pendente_query['total'] or 0.00
+
+        # 3. Pacientes Recentes
+        pacientes_recentes = Paciente.objects.filter(
+            cadastrado_por=profissional
+        ).order_by('-data_cadastro')[:5]
+
+        # 4. Aniversariantes do Mês
+        aniversariantes_mes = Paciente.objects.filter(
+            cadastrado_por=profissional,
+            data_nascimento__isnull=False,
+            data_nascimento__month=hoje.month
+        ).order_by('data_nascimento__day')
+
+        # Serializando os dados para a resposta
+        data = {
+            'agendamentos_hoje': AgendamentoSerializer(agendamentos_hoje, many=True).data,
+            'agendamentos_futuros': AgendamentoSerializer(agendamentos_futuros, many=True).data,
+            'total_pendente': total_pendente,
+            'pacientes_recentes': PacienteSerializerSimple(pacientes_recentes, many=True).data,
+            'aniversariantes_mes': PacienteSerializerSimple(aniversariantes_mes, many=True).data,
+        }
+
+        return Response(data)

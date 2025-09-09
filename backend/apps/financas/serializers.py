@@ -49,7 +49,7 @@ class TransacaoSerializer(serializers.ModelSerializer):
 
         paciente = data.get('paciente')
         if paciente:
-            if not Paciente.objects.filter(pk=paciente.pk, profissional=profissional).exists():
+            if not Paciente.objects.filter(pk=paciente.pk, cadastrado_por=profissional).exists():
                 raise serializers.ValidationError({"paciente_id": "Você só pode criar transações para os seus próprios pacientes."})
         
         # Valida o agendamento

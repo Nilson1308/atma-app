@@ -197,9 +197,15 @@ watch(() => props.agendamento, (novoAgendamento) => {
       opcoesPacientes.value = [{ id: novoAgendamento.paciente, nome_completo: novoAgendamento.paciente_nome }]
     }
     
+    // --- CORREÇÃO APLICADA AQUI ---
     if (novoAgendamento.servico) {
-      servicoSelecionado.value = novoAgendamento.servico;
-      opcoesServicos.value = [novoAgendamento.servico];
+      // Cria um objeto de serviço para preencher o q-select corretamente.
+      const servicoObj = {
+        id: novoAgendamento.servico,
+        nome_servico: novoAgendamento.servico_nome // Assumindo que o nome do serviço também vem na resposta
+      };
+      servicoSelecionado.value = servicoObj;
+      opcoesServicos.value = [servicoObj];
     } else {
       servicoSelecionado.value = null;
     }
@@ -223,7 +229,6 @@ watch(() => props.agendamento, (novoAgendamento) => {
 watch(servicoSelecionado, (novoServico) => {
   if (!novoServico) return;
 
-  // CORREÇÃO: Usa 'nome_servico' para preencher o título, conforme a resposta da API
   agendamentoLocal.value.titulo = novoServico.nome_servico
 
   if (horaInicio.value) {

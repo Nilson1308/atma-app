@@ -94,6 +94,19 @@ const transacaoLocal = ref({})
 const opcoesPacientes = ref([])
 const opcoesServicos = ref([])
 
+const formatarValor = (value) => {
+  if (!value) {
+    transacaoLocal.value.valor_cobrado = ''
+    return
+  }
+  let numero = value.toString().replace(/\D/g, '').replace(/^0+/, '')
+  if (numero.length === 0) { transacaoLocal.value.valor_cobrado = '0,00'; return }
+  if (numero.length === 1) { transacaoLocal.value.valor_cobrado = `0,0${numero}`; return }
+  if (numero.length === 2) { transacaoLocal.value.valor_cobrado = `0,${numero}`; return }
+  const parteInteiraFormatada = numero.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  transacaoLocal.value.valor_cobrado = `${parteInteiraFormatada},${numero.slice(-2)}`
+}
+
 watch(() => props.transacao, (novaTransacao) => {
   if (novaTransacao) {
     transacaoLocal.value = { ...novaTransacao, paciente_id: novaTransacao.paciente.id, servico_prestado_id: novaTransacao.servico_prestado.id }
@@ -112,19 +125,6 @@ watch(() => props.transacao, (novaTransacao) => {
     }
   }
 }, { immediate: true })
-
-const formatarValor = (value) => {
-  if (!value) {
-    transacaoLocal.value.valor_cobrado = ''
-    return
-  }
-  let numero = value.toString().replace(/\D/g, '').replace(/^0+/, '')
-  if (numero.length === 0) { transacaoLocal.value.valor_cobrado = '0,00'; return }
-  if (numero.length === 1) { transacaoLocal.value.valor_cobrado = `0,0${numero}`; return }
-  if (numero.length === 2) { transacaoLocal.value.valor_cobrado = `0,${numero}`; return }
-  const parteInteiraFormatada = numero.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  transacaoLocal.value.valor_cobrado = `${parteInteiraFormatada},${numero.slice(-2)}`
-}
 
 const filtrarPacientes = async (val, update) => {
   if (val.length < 2) { update(() => { opcoesPacientes.value = [] }); return }
