@@ -21,24 +21,3 @@ Frontend: Vue.js (Quasar Framework)
 Banco de Dados: PostgreSQL
 
 Ambiente: Docker & Docker Compose
-
-
----
-
-### Próximos Passos (a sequência correta)
-
-Depois de salvar esses dois arquivos na pasta `atma-app/`, execute os seguintes comandos no seu terminal, um de cada vez:
-
-1.  **Adicione TODOS os arquivos (o `.gitignore` vai filtrar o que não deve ir):**
-    ```bash
-    git add .
-    ```
-
-2.  **Crie seu primeiro "commit" (um registro das suas alterações):**
-    ```bash
-    git commit -m "Initial commit: Configuração do projeto e módulos iniciais"
-    ```
-
-3.  **Agora sim, envie para o GitHub:**
-    ```bash
-    git push -u origin main
