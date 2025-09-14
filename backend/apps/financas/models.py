@@ -38,6 +38,7 @@ class Transacao(models.Model):
     data_pagamento = models.DateField(blank=True, null=True)
     notas = models.TextField(blank=True, null=True)
     data_criacao = models.DateTimeField(auto_now_add=True)
+    lembrete_pagamento_enviado = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Transação de {self.valor_cobrado} para {self.paciente.nome_completo}"

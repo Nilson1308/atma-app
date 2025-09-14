@@ -381,7 +381,14 @@ function confirmarExcluirEntrada(entrada) {
 
 // Funções Utilitárias de Cores
 function getStatusColorAgendamento(status) {
-  const cores = { 'Agendado': 'blue', 'Confirmado': 'green', 'Realizado': 'positive', 'Cancelado': 'red', 'Não Compareceu': 'orange' }
+  const cores = { 
+    'Agendado': 'blue', 
+    'Confirmado': 'green', 
+    'Realizado': 'positive', 
+    'Cancelado': 'red', 
+    'Não Compareceu': 'orange',
+    'Reagendar': 'deep-purple'
+  }
   return cores[status] || 'grey'
 }
 

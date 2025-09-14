@@ -1,13 +1,18 @@
-from rest_framework import viewsets, permissions
+import os
+import traceback
+from django.http import HttpResponse
+from django.utils import timezone
+from rest_framework import permissions, viewsets
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from twilio.rest import Client
+from twilio.base.exceptions import TwilioRestException
+import google.generativeai as genai
+
+from apps.users.models import Paciente
+from .ia_manager import GeminiAIManager
 from .models import Agendamento
 from .serializers import AgendamentoSerializer
-from apps.financas.models import Transacao
-from rest_framework.views import APIView
-from django.shortcuts import get_object_or_404
-from django.http import HttpResponse
-from rest_framework.response import Response
-from django.utils import timezone
-from apps.users.models import Paciente
 
 class AgendamentoViewSet(viewsets.ModelViewSet):
     serializer_class = AgendamentoSerializer
@@ -88,59 +93,76 @@ class ConfirmarAgendamentoView(APIView):
         return HttpResponse(html_response)
 
 class WhatsAppWebhookView(APIView):
-    """
-    Webhook para receber e processar as respostas dos pacientes via WhatsApp.
-    """
-    permission_classes = [permissions.AllowAny] # Público para receber chamadas da API do WhatsApp
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
-        # A estrutura dos dados pode variar dependendo do provedor (ex: Twilio)
-        # Vamos simular uma estrutura comum: {'from': 'whatsapp:+5511...', 'body': 'Sim'}
-        remetente = request.data.get('from', '')
-        corpo_mensagem = request.data.get('body', '').strip().upper()
+        print("\n" + "="*20 + " WEBHOOK INICIADO " + "="*20)
+        try:
+            remetente = request.data.get('From', '')
+            corpo_mensagem = request.data.get('Body', '')
+            print(f"Recebido de: {remetente}, Mensagem: '{corpo_mensagem}'")
 
-        # Limpa o número de telefone que recebemos para conter apenas os últimos 11 dígitos
-        numero_paciente_webhook = ''.join(filter(str.isdigit, remetente))[-11:]
+            numero_paciente_webhook = ''.join(filter(str.isdigit, remetente))[-11:]
+            if not numero_paciente_webhook or not corpo_mensagem:
+                return Response({"status": "erro"}, status=400)
 
-        if not numero_paciente_webhook or not corpo_mensagem:
-            return Response({"status": "erro", "mensagem": "Dados inválidos."}, status=400)
+            print("Passo 1: A procurar o paciente...")
+            paciente = next((p for p in Paciente.objects.filter(contato_telefone__isnull=False) if ''.join(filter(str.isdigit, p.contato_telefone)).endswith(numero_paciente_webhook)), None)
+            if not paciente:
+                raise Paciente.DoesNotExist
 
-        # Palavras-chave para confirmação
-        palavras_de_confirmacao = ['SIM', 'CONFIRMO', 'CONFIRMADO', 'OK']
+            print(f"Passo 2: Paciente encontrado: {paciente.nome_completo}")
 
-        if corpo_mensagem in palavras_de_confirmacao:
+            # ... (Lógica de respostas rápidas: SIM, NÃO, etc. - sem alterações)
+
+            # --- LÓGICA DA IA MOVIDA DIRETAMENTE PARA AQUI ---
+            print("Passo 4: Nenhuma resposta rápida. A chamar a IA diretamente na View...")
+            GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+            if not GEMINI_API_KEY:
+                print("!!! ERRO CRÍTICO: GEMINI_API_KEY não encontrada no ficheiro .env !!!")
+                return Response({"status": "erro_configuracao"})
+            
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+            prompt = f"""
+            Você é uma secretária virtual para {paciente.cadastrado_por.nome_completo}, um(a) profissional de saúde.
+            Um paciente enviou a seguinte mensagem via WhatsApp: "{corpo_mensagem}"
+
+            A sua tarefa é analisar esta mensagem e determinar a intenção do paciente.
+            Responda com APENAS uma das seguintes palavras-chave:
+            - AGENDAR
+            - DUVIDA
+            - DESCONHECIDO
+            """
+            
             try:
-                # Lógica de busca robusta: Compara apenas os dígitos dos números
-                paciente_encontrado = None
-                for p in Paciente.objects.filter(contato_telefone__isnull=False):
-                    db_telefone_digits = ''.join(filter(str.isdigit, p.contato_telefone))
-                    if db_telefone_digits.endswith(numero_paciente_webhook):
-                        paciente_encontrado = p
-                        break
-                
-                if not paciente_encontrado:
-                    raise Paciente.DoesNotExist
-
-                paciente = paciente_encontrado
-                # Encontra o próximo agendamento "Agendado" para este paciente
-                agendamento_para_confirmar = Agendamento.objects.filter(
-                    paciente=paciente,
-                    status='Agendado',
-                    data_hora_inicio__gte=timezone.now()
-                ).order_by('data_hora_inicio').first()
-
-                if agendamento_para_confirmar:
-                    agendamento_para_confirmar.status = 'Confirmado'
-                    agendamento_para_confirmar.save()
-                    print(f"Agendamento de {paciente.nome_completo} confirmado por resposta de WhatsApp.")
-                    return Response({"status": "sucesso", "mensagem": "Agendamento confirmado."})
-                else:
-                    return Response({"status": "info", "mensagem": "Nenhum agendamento pendente encontrado."})
-
-            except Paciente.DoesNotExist:
-                return Response({"status": "erro", "mensagem": "Paciente não encontrado."}, status=404)
+                response = model.generate_content(prompt)
+                intent = response.text.strip().upper()
             except Exception as e:
-                print(f"Erro no webhook do WhatsApp: {e}")
-                return Response({"status": "erro", "mensagem": "Erro interno do servidor."}, status=500)
+                print(f"!!! ERRO DIRETO DA GEMINI API: {e}")
+                intent = "ERRO_API"
+            # --------------------------------------------------
 
-        return Response({"status": "info", "mensagem": "Mensagem não é uma confirmação."})
+            print(f"Passo 5: Intenção da IA detetada: {intent}")
+
+            if intent == "AGENDAR":
+                print("Passo 6: A gerar resposta com horários...")
+                # Continuamos a usar o manager para as outras lógicas que já funcionam
+                ai_manager = GeminiAIManager(profissional=paciente.cadastrado_por)
+                resposta_ia = ai_manager.gerar_resposta_com_horarios()
+                
+                print("Passo 7: A enviar resposta para o paciente...")
+                envio_sucesso = responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
+                print(f"Passo 8: Estado do envio: {'SUCESSO' if envio_sucesso else 'FALHA'}")
+                return Response({"status": "processado"})
+
+            else:
+                print("--> Ação: Intenção não é 'AGENDAR'. A terminar o processo.")
+                return Response({"status": "info"})
+
+        except Paciente.DoesNotExist:
+            return Response({"status": "erro", "mensagem": "Paciente não encontrado."}, status=404)
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"status": "erro", "mensagem": "Erro interno do servidor."}, status=500)

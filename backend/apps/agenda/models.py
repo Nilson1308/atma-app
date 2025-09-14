@@ -14,6 +14,7 @@ class Agendamento(models.Model):
         ('Cancelado', 'Cancelado'),
         ('Realizado', 'Realizado'),
         ('Não Compareceu', 'Não Compareceu'),
+        ('Reagendar', 'Reagendar'),
     ]
 
     # Relacionamentos usando string reference para evitar importação circular
@@ -43,6 +44,7 @@ class Agendamento(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Agendado')
     lembrete_enviado = models.BooleanField(default=False)
     token_confirmacao = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    follow_up_enviado = models.BooleanField(default=False)
 
     # Timestamps
     criado_em = models.DateTimeField(auto_now_add=True)
