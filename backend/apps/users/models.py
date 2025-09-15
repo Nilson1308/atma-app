@@ -57,6 +57,31 @@ class Paciente(models.Model):
     )
     cadastrado_por = models.ForeignKey(Profissional, on_delete=models.SET_NULL, null=True, blank=True, related_name='pacientes_cadastrados')
     data_cadastro = models.DateTimeField(auto_now_add=True)
+    conversation_state = models.CharField(max_length=50, null=True, blank=True, help_text="Controla o estado da conversa com a IA")
 
     def __str__(self):
         return self.nome_completo
+
+class Plano(models.Model):
+    NOME_CHOICES = [
+        ('BASICO', 'Básico'),
+        ('INTERMEDIARIO', 'Intermediário'),
+        ('PREMIUM', 'Premium'),
+    ]
+    nome = models.CharField(max_length=50, choices=NOME_CHOICES, unique=True)
+    limite_usuarios = models.PositiveIntegerField(default=1)
+    limite_mensagens_ia = models.PositiveIntegerField(default=0)
+    preco_mensal = models.DecimalField(max_digits=10, decimal_places=2)
+
+    def __str__(self):
+        return self.get_nome_display()
+
+class Assinatura(models.Model):
+    profissional = models.OneToOneField(Profissional, on_delete=models.CASCADE, related_name='assinatura')
+    plano = models.ForeignKey(Plano, on_delete=models.PROTECT) # PROTECT para não deletar um plano em uso
+    ativa = models.BooleanField(default=True)
+    data_inicio = models.DateField(auto_now_add=True)
+    data_fim = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.profissional.nome_completo} - Plano {self.plano.get_nome_display()}"

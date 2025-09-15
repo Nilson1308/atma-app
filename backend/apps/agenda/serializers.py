@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Agendamento
+from .models import Agendamento, HorarioTrabalho, ExcecaoHorario
 
 class AgendamentoSerializer(serializers.ModelSerializer):
     """
@@ -18,3 +18,19 @@ class AgendamentoSerializer(serializers.ModelSerializer):
         # Adicionamos os campos extras que criamos acima à lista de campos a serem lidos.
         read_only_fields = ['paciente_nome', 'profissional_nome', 'servico_nome', 'profissional']
 
+class HorarioTrabalhoSerializer(serializers.ModelSerializer):
+    """
+    Serializer para o modelo HorarioTrabalho.
+    """
+    class Meta:
+        model = HorarioTrabalho
+        fields = ['id', 'dia_da_semana', 'hora_inicio', 'hora_fim', 'ativo']
+
+
+class ExcecaoHorarioSerializer(serializers.ModelSerializer):
+    """
+    Serializer para o modelo ExcecaoHorario.
+    """
+    class Meta:
+        model = ExcecaoHorario
+        fields = ['id', 'data', 'dia_inteiro', 'hora_inicio', 'hora_fim', 'descricao']

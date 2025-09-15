@@ -3,7 +3,6 @@
     <q-card-section>
       <div class="row q-col-gutter-md">
 
-        <!-- Campo Paciente -->
         <div class="col-12">
           <q-select
             filled
@@ -31,7 +30,6 @@
           </q-select>
         </div>
 
-        <!-- Campo Serviço -->
         <div class="col-12">
           <q-select
             filled
@@ -59,7 +57,6 @@
         </div>
 
 
-        <!-- Campo Título -->
         <div class="col-12">
           <q-input
             filled
@@ -69,7 +66,6 @@
           />
         </div>
 
-        <!-- Campo Data -->
         <div class="col-6">
           <q-input filled v-model="dataAgendamento" mask="##/##/####" :rules="[val => val && val.length === 10 || 'Data inválida']" label="Data *">
             <template v-slot:append>
@@ -86,7 +82,6 @@
           </q-input>
         </div>
 
-        <!-- Campo Status -->
         <div class="col-6">
            <q-select
             filled
@@ -97,7 +92,6 @@
           />
         </div>
 
-        <!-- Campo Hora Início -->
         <div class="col-6">
           <q-input filled v-model="horaInicio" mask="time" :rules="['time']" label="Hora Início *">
             <template v-slot:append>
@@ -114,7 +108,6 @@
           </q-input>
         </div>
 
-        <!-- Campo Hora Fim -->
         <div class="col-6">
           <q-input filled v-model="horaFim" mask="time" :rules="['time']" label="Hora Fim *">
             <template v-slot:append>
@@ -131,7 +124,6 @@
           </q-input>
         </div>
 
-        <!-- Campo Notas -->
         <div class="col-12">
           <q-input
             filled
@@ -157,14 +149,13 @@ import { ref, watch } from 'vue'
 import { api } from 'boot/axios'
 import { Notify, date } from 'quasar'
 
+// --- 1. RECEBE A NOVA PROPRIEDADE ---
 const props = defineProps({
-  agendamento: {
-    type: Object,
-    default: null
-  },
-  dataSelecionada: {
-    type: Date,
-    default: null
+  agendamento: Object,
+  dataSelecionada: Date,
+  horariosTrabalho: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -173,7 +164,7 @@ const emit = defineEmits(['agendamentoSalvo'])
 const agendamentoLocal = ref({})
 const opcoesPacientes = ref([])
 const opcoesServicos = ref([])
-const servicoSelecionado = ref(null) // Agora vai guardar o objeto completo do serviço
+const servicoSelecionado = ref(null)
 
 const dataAgendamento = ref(null)
 const horaInicio = ref(null)
@@ -196,13 +187,11 @@ watch(() => props.agendamento, (novoAgendamento) => {
     if (novoAgendamento.paciente) {
       opcoesPacientes.value = [{ id: novoAgendamento.paciente, nome_completo: novoAgendamento.paciente_nome }]
     }
-    
-    // --- CORREÇÃO APLICADA AQUI ---
+
     if (novoAgendamento.servico) {
-      // Cria um objeto de serviço para preencher o q-select corretamente.
       const servicoObj = {
         id: novoAgendamento.servico,
-        nome_servico: novoAgendamento.servico_nome // Assumindo que o nome do serviço também vem na resposta
+        nome_servico: novoAgendamento.servico_nome
       };
       servicoSelecionado.value = servicoObj;
       opcoesServicos.value = [servicoObj];
@@ -211,7 +200,6 @@ watch(() => props.agendamento, (novoAgendamento) => {
     }
 
   } else {
-    // Reset para um novo agendamento
     agendamentoLocal.value = {
       titulo: '',
       paciente: null,
@@ -227,18 +215,15 @@ watch(() => props.agendamento, (novoAgendamento) => {
 
 
 watch(servicoSelecionado, (novoServico) => {
-  if (!novoServico) return;
+  if (!novoServico || !horaInicio.value) return;
 
   agendamentoLocal.value.titulo = novoServico.nome_servico
 
-  if (horaInicio.value) {
-    const [horas, minutos] = horaInicio.value.split(':')
-    const dataInicio = new Date()
-    dataInicio.setHours(horas, minutos, 0, 0)
+  const [horas, minutos] = horaInicio.value.split(':')
+  const dataInicioObj = date.extractDate(`${dataAgendamento.value} ${horas}:${minutos}`, 'DD/MM/YYYY HH:mm')
+  const dataFimObj = date.addToDate(dataInicioObj, { minutes: novoServico.duracao_padrao })
 
-    const dataFim = date.addToDate(dataInicio, { minutes: novoServico.duracao_padrao })
-    horaFim.value = date.formatDate(dataFim, 'HH:mm')
-  }
+  horaFim.value = date.formatDate(dataFimObj, 'HH:mm')
 })
 
 const filtrarPacientes = async (val, update) => {
@@ -269,10 +254,34 @@ const filtrarServicos = async (val, update) => {
   }
 }
 
+// --- 2. NOVA FUNÇÃO DE VALIDAÇÃO ---
+function isHorarioPermitido(dataParaVerificar) {
+  const diaDaSemana = dataParaVerificar.getDay(); // 0=Domingo, 1=Segunda...
+  const hora = dataParaVerificar.toTimeString().substring(0, 8);
+
+  const regraDoDia = props.horariosTrabalho.find(bh => bh.daysOfWeek.includes(diaDaSemana));
+
+  if (!regraDoDia) {
+    return false;
+  }
+  return hora >= regraDoDia.startTime && hora < regraDoDia.endTime;
+}
+
 const submitForm = async () => {
+  // --- 3. VALIDAÇÃO ANTES DE ENVIAR ---
+  const dataInicioObj = date.extractDate(`${dataAgendamento.value} ${horaInicio.value}`, 'DD/MM/YYYY HH:mm')
+  
+  if (!isHorarioPermitido(dataInicioObj)) {
+    Notify.create({
+      color: 'negative',
+      icon: 'o_block',
+      message: 'O horário selecionado está fora do expediente de trabalho configurado.'
+    })
+    return; // Impede o envio do formulário
+  }
+
   try {
-    const dataFormatada = date.extractDate(dataAgendamento.value, 'DD/MM/YYYY')
-    const dataISO = date.formatDate(dataFormatada, 'YYYY-MM-DD')
+    const dataISO = date.formatDate(dataInicioObj, 'YYYY-MM-DD')
 
     const payload = {
       ...agendamentoLocal.value,
@@ -307,4 +316,3 @@ const submitForm = async () => {
 }
 
 </script>
-

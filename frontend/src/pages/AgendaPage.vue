@@ -35,7 +35,6 @@
       </q-card-section>
     </q-card>
 
-    <!-- Diálogo para Adicionar/Editar Agendamento -->
     <q-dialog v-model="formDialogVisible">
       <q-card style="width: 600px; max-width: 90vw;">
         <q-card-section>
@@ -44,12 +43,11 @@
         <agendamento-form
           :agendamento="agendamentoEmEdicao"
           :data-selecionada="dataClicada"
-          @agendamento-salvo="onAgendamentoSalvo"
+          :horarios-trabalho="calendarOptions.businessHours" @agendamento-salvo="onAgendamentoSalvo"
         />
       </q-card>
     </q-dialog>
 
-    <!-- Diálogo de Detalhes do Agendamento -->
     <q-dialog v-model="detailsDialogVisible">
        <q-card style="width: 400px;">
         <q-card-section>
@@ -95,16 +93,32 @@ import AgendamentoForm from 'src/components/AgendamentoForm.vue'
 
 const fullCalendar = ref(null)
 const calendarTitle = ref('')
-const viewName = ref('dayGridMonth')
+const viewName = ref('timeGridWeek')
 const formDialogVisible = ref(false)
 const detailsDialogVisible = ref(false)
 const agendamentoEmEdicao = ref(null)
 const agendamentoSelecionado = ref(null)
 const dataClicada = ref(null)
 
+// --- NOVA FUNÇÃO DE VALIDAÇÃO ---
+function isHorarioPermitido(data) {
+  const diaDaSemana = data.getDay(); // 0=Domingo, 1=Segunda...
+  const hora = data.toTimeString().substring(0, 8); // Formato HH:mm:ss
+
+  // Encontra a regra de horário para o dia da semana
+  const regraDoDia = calendarOptions.businessHours.find(bh => bh.daysOfWeek.includes(diaDaSemana));
+
+  if (!regraDoDia) {
+    return false; // Não há horário de trabalho para este dia
+  }
+
+  // Verifica se a hora clicada está dentro do intervalo de trabalho
+  return hora >= regraDoDia.startTime && hora < regraDoDia.endTime;
+}
+
 const calendarOptions = reactive({
   plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin],
-  initialView: 'dayGridMonth',
+  initialView: 'timeGridWeek',
   headerToolbar: false,
   locale: 'pt-br',
   buttonText: { today: 'Hoje', month: 'Mês', week: 'Semana', day: 'Dia' },
@@ -113,8 +127,42 @@ const calendarOptions = reactive({
   selectable: true,
   dateClick: handleDateClick,
   eventClick: handleEventClick,
-  viewDidMount: (info) => { calendarTitle.value = info.view.title }
+  viewDidMount: (info) => { calendarTitle.value = info.view.title },
+
+  businessHours: [],
+  selectConstraint: 'businessHours',
+
+  // --- CORREÇÃO ADICIONADA: Validação fina para seleção ---
+  selectAllow: (selectInfo) => {
+    return isHorarioPermitido(selectInfo.start);
+  },
+
+  slotMinTime: "07:00:00",
+  slotMaxTime: "22:00:00",
+  allDaySlot: false,
+  nowIndicator: true,
+  scrollTime: '08:00:00'
 })
+
+async function fetchHorariosTrabalho() {
+  try {
+    const response = await api.get('/horarios-trabalho/')
+    const horariosFormatados = response.data
+      .filter(h => h.ativo)
+      .map(h => {
+        const dayOfWeekFC = h.dia_da_semana === 6 ? 0 : h.dia_da_semana + 1;
+        return {
+          daysOfWeek: [dayOfWeekFC],
+          startTime: h.hora_inicio,
+          endTime: h.hora_fim
+        }
+      })
+    calendarOptions.businessHours = horariosFormatados
+  } catch (error) {
+    console.error('Erro ao buscar horários de trabalho:', error)
+    Notify.create({ color: 'negative', message: 'Não foi possível carregar os horários de trabalho.' })
+  }
+}
 
 async function fetchAgendamentos() {
   try {
@@ -132,10 +180,22 @@ async function fetchAgendamentos() {
   }
 }
 
+// --- FUNÇÃO dateClick ATUALIZADA ---
 function handleDateClick(arg) {
-  agendamentoEmEdicao.value = null
-  dataClicada.value = arg.date // Usar o objeto Date para evitar problemas de fuso
-  formDialogVisible.value = true
+  if (isHorarioPermitido(arg.date)) {
+    // Se o horário for permitido, abre o formulário
+    agendamentoEmEdicao.value = null
+    dataClicada.value = arg.date
+    formDialogVisible.value = true
+  } else {
+    // Se não for, exibe um alerta
+    Notify.create({
+      color: 'negative',
+      icon: 'o_block',
+      message: 'Este horário está fora do seu expediente de trabalho.',
+      position: 'top'
+    })
+  }
 }
 
 function handleEventClick(arg) {
@@ -179,8 +239,8 @@ function today() { fullCalendar.value.getApi().today(); calendarTitle.value = fu
 function changeView(view) { fullCalendar.value.getApi().changeView(view); calendarTitle.value = fullCalendar.value.getApi().view.title }
 
 onMounted(() => {
-  nextTick(() => {
-    fetchAgendamentos()
+  nextTick(async () => {
+    await Promise.all([fetchHorariosTrabalho(), fetchAgendamentos()])
   })
 })
 </script>
@@ -189,4 +249,3 @@ onMounted(() => {
 .fc .fc-button { padding: 0.4em 0.65em !important; }
 .fc-event { cursor: pointer; }
 </style>
-
