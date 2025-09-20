@@ -1,60 +1,58 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
+import { api } from 'boot/axios';
 
 export const useAuthStore = defineStore('auth', () => {
   // --- STATE ---
-  // Inicializa o token pegando do localStorage, se existir.
   const accessToken = ref(localStorage.getItem('accessToken') || null);
   const refreshToken = ref(localStorage.getItem('refreshToken') || null);
+  const user = ref(JSON.parse(localStorage.getItem('user')) || null);
   const router = useRouter();
 
   // --- GETTERS ---
-  // Um getter computado para saber facilmente se o usuário está logado.
-  const isAuthenticated = computed(() => !!accessToken.value);
+  const isAuthenticated = computed(() => !!accessToken.value && !!user.value);
+  const conta = computed(() => user.value?.conta);
 
   // --- ACTIONS ---
   
-  /**
-   * Processa o login, armazena os tokens e redireciona.
-   * @param {string} access - O token de acesso JWT.
-   * @param {string} refresh - O token de atualização JWT.
-   */
-  function login(access, refresh) {
-    // Armazena os tokens no estado da store.
+  async function login(access, refresh) {
     accessToken.value = access;
     refreshToken.value = refresh;
-
-    // Armazena os tokens no localStorage para persistência.
     localStorage.setItem('accessToken', access);
     localStorage.setItem('refreshToken', refresh);
 
-    // TODO: Buscar dados do usuário da API.
-
-    // Redireciona para a página principal após o login.
-    router.push('/dashboard'); // Vamos criar esta rota a seguir.
+    try {
+      // Após o login, busca os dados do usuário
+      const response = await api.get('/profissionais/me/');
+      user.value = response.data;
+      localStorage.setItem('user', JSON.stringify(user.value));
+      
+      // Redireciona para a página principal
+      router.push('/dashboard');
+    } catch (error) {
+      console.error("Erro ao buscar dados do usuário após login:", error);
+      // Se falhar, faz logout para limpar o estado inconsistente
+      logout();
+    }
   }
 
-  /**
-   * Processa o logout, limpa os dados e redireciona.
-   */
   function logout() {
-    // Limpa os tokens do estado.
     accessToken.value = null;
     refreshToken.value = null;
-
-    // Remove os tokens do localStorage.
+    user.value = null;
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
-
-    // Redireciona para a página de login.
+    localStorage.removeItem('user');
     router.push('/');
   }
 
-  // Expõe o estado, getters e actions para serem usados nos componentes.
+  // Expõe tudo para ser usado nos componentes
   return {
     accessToken,
     refreshToken,
+    user,
+    conta,
     isAuthenticated,
     login,
     logout,

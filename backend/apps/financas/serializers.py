@@ -8,7 +8,7 @@ class ServicoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Servico
         fields = '__all__'
-        read_only_fields = ['profissional']
+        read_only_fields = ['conta']
 
 class AgendamentoTransacaoSerializer(serializers.ModelSerializer):
     paciente = PacienteSerializerSimple(read_only=True)
@@ -41,26 +41,25 @@ class TransacaoSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         profissional = self.context['request'].user
+        conta_profissional = profissional.conta
         
         # Valida o serviço
         servico = data.get('servico_prestado')
-        if servico and servico.profissional != profissional:
-            raise serializers.ValidationError({"servico_prestado_id": "Você só pode usar os seus próprios serviços."})
+        if servico and servico.conta != conta_profissional:
+            raise serializers.ValidationError({"servico_prestado_id": "Este serviço não pertence à sua clínica/conta."})
 
         paciente = data.get('paciente')
-        if paciente:
-            if not Paciente.objects.filter(pk=paciente.pk, cadastrado_por=profissional).exists():
-                raise serializers.ValidationError({"paciente_id": "Você só pode criar transações para os seus próprios pacientes."})
+        if paciente and paciente.conta != conta_profissional:
+            raise serializers.ValidationError({"paciente_id": "Este paciente não pertence à sua clínica/conta."})
         
         # Valida o agendamento
         agendamento = data.get('agendamento')
-        if agendamento and agendamento.profissional != profissional:
-            raise serializers.ValidationError({"agendamento_id": "Você só pode usar os seus próprios agendamentos."})
+        if agendamento and agendamento.profissional.conta != conta_profissional:
+            raise serializers.ValidationError({"agendamento_id": "Este agendamento não pertence à sua clínica/conta."})
 
         return data
 
     def create(self, validated_data):
-        # Associa o profissional logado automaticamente
         validated_data['profissional'] = self.context['request'].user
         return super().create(validated_data)
 

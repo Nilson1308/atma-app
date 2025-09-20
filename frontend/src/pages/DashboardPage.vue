@@ -3,7 +3,9 @@
     <div class="q-pa-md">
       <!-- Mensagem de Boas-Vindas -->
       <div class="text-h4">Olá, {{ authStore.user?.nome_completo || 'Profissional' }}!</div>
-      <div class="text-subtitle1 text-grey-7 q-mb-lg">Aqui está um resumo da sua semana.</div>
+      <div class="text-subtitle1 text-grey-7 q-mb-lg">
+        Bem-vindo(a) à sua conta {{ authStore.conta?.nome_conta || 'Atma App' }}.
+      </div>
 
       <div v-if="loading" class="text-center">
         <q-spinner-dots color="primary" size="40px" />
@@ -18,7 +20,7 @@
               <div class="text-h6">Atendimentos de Hoje ({{ new Date().toLocaleDateString('pt-BR') }})</div>
             </q-card-section>
             <q-list separator>
-              <q-item v-for="ag in dashboardData.agendamentos_hoje" :key="ag.id" clickable :to="`/pacientes/${ag.paciente}`">
+              <q-item v-for="ag in dashboardData.agendamentos_hoje" :key="ag.id" clickable :to="`/dashboard/pacientes/${ag.paciente}`">
                 <q-item-section avatar>
                   <q-icon name="o_person" color="primary" />
                 </q-item-section>
@@ -42,7 +44,7 @@
               <div class="text-h6">Próximos 7 Dias</div>
             </q-card-section>
             <q-list separator>
-              <q-item v-for="ag in dashboardData.agendamentos_futuros" :key="ag.id" clickable :to="`/pacientes/${ag.paciente}`">
+              <q-item v-for="ag in dashboardData.agendamentos_futuros" :key="ag.id" clickable :to="`/dashboard/pacientes/${ag.paciente}`">
                 <q-item-section>
                   <q-item-label>{{ ag.paciente_nome }}</q-item-label>
                   <q-item-label caption>{{ ag.titulo }}</q-item-label>
@@ -59,7 +61,7 @@
               </q-item>
             </q-list>
             <q-card-actions align="right">
-              <q-btn flat color="primary" to="/agenda" label="Ver Agenda Completa" />
+              <q-btn flat color="primary" to="/dashboard/agenda" label="Ver Agenda Completa" />
             </q-card-actions>
           </q-card>
         </div>
@@ -74,7 +76,7 @@
               <div class="text-subtitle2 text-grey-7">Total em faturas pendentes</div>
             </q-card-section>
             <q-card-actions align="right">
-              <q-btn flat color="primary" to="/financas" label="Ver Finanças" />
+              <q-btn flat color="primary" to="/dashboard/financas" label="Ver Finanças" />
             </q-card-actions>
           </q-card>
 
@@ -84,7 +86,7 @@
               <div class="text-h6">Aniversariantes do Mês</div>
             </q-card-section>
              <q-list separator>
-              <q-item v-for="p in dashboardData.aniversariantes_mes" :key="p.id" clickable :to="`/pacientes/${p.id}`">
+              <q-item v-for="p in dashboardData.aniversariantes_mes" :key="p.id" clickable :to="`/dashboard/pacientes/${p.id}`">
                 <q-item-section avatar>
                   <q-icon name="o_cake" color="pink" />
                 </q-item-section>

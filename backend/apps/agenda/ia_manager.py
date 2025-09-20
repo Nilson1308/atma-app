@@ -20,16 +20,28 @@ class GeminiAIManager:
         self.profissional = profissional
         self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-    def analisar_mensagem_paciente(self, mensagem_paciente: str):
+    def analisar_mensagem_paciente(self, mensagem_paciente: str, horarios_oferecidos: list = None):
+        horarios_ofertados_str = "Nenhum horário foi oferecido ainda."
+        if horarios_oferecidos:
+            horarios_formatados = [
+                f"'{django_timezone.localtime(h).strftime('%A, dia %d, às %H:%M')}'"
+                for h in horarios_oferecidos
+            ]
+            horarios_ofertados_str = f"Os seguintes horários foram oferecidos ao paciente: {', '.join(horarios_formatados)}"
+
         prompt = f"""
-        Analise a mensagem do paciente e determine sua intenção principal.
+        Analise a mensagem do paciente e determine sua intenção principal, considerando o contexto da conversa.
         Responda APENAS com um JSON contendo a chave "intent".
 
+        Contexto da conversa:
+        {horarios_ofertados_str}
+
         As intenções possíveis são:
-        - "AGENDAR": Se o paciente quer marcar uma consulta, mas não especificou um dia ou período. (Ex: "Quero marcar uma consulta", "Gostaria de um horário")
-        - "AGENDAR_COM_PREFERENCIA": Se o paciente quer marcar e JÁ ESPECIFICOU um dia ou período. (Ex: "Tem horário para terça à tarde?", "Pode ser na sexta de manhã?", "Nenhum desses serve, tem na segunda?")
-        - "ESCOLHEU_HORARIO": Se o paciente está confirmando um horário específico que foi oferecido. (Ex: "Pode ser às 10h", "ok, confirmado para as 9h", "Gostei do primeiro horário")
-        - "DUVIDA": Se o paciente está fazendo uma pergunta geral que não seja sobre agendamento.
+        - "SAUDACAO": Se for apenas um cumprimento ou uma mensagem genérica sem um pedido claro. (Ex: "oi, bom dia", "olá", "tudo bem?")
+        - "AGENDAR": Se o paciente quer marcar uma consulta, mas não especificou um dia ou período.
+        - "AGENDAR_COM_PREFERENCIA": Se o paciente quer marcar e JÁ ESPECIFICOU um dia ou período.
+        - "ESCOLHEU_HORARIO": Se a mensagem do paciente corresponde claramente a um dos horários específicos que foram oferecidos.
+        - "DUVIDA": Se o paciente está fazendo uma pergunta geral.
 
         Mensagem do paciente: "{mensagem_paciente}"
         """
@@ -39,6 +51,17 @@ class GeminiAIManager:
             return json.loads(cleaned_response)
         except (json.JSONDecodeError, AttributeError):
             return {"intent": "DESCONHECIDO"}
+
+    def gerar_pergunta_nome_completo(self):
+        prompt = """
+        Você é uma secretária virtual. Um novo paciente acaba de confirmar um horário para sua primeira consulta.
+        Sua tarefa é pedir, de forma amigável, o nome completo dele para finalizar o agendamento.
+
+        Exemplo de resposta:
+        "Ótimo! Para finalizar o seu agendamento, por favor, me informe o seu nome completo."
+        """
+        response = self.model.generate_content(prompt)
+        return response.text.strip()
 
     def gerar_pergunta_preferencia(self, nome_paciente: str):
         prompt = f"""
@@ -74,6 +97,38 @@ class GeminiAIManager:
             return json.loads(cleaned_response)
         except (json.JSONDecodeError, AttributeError):
             return {"dia_semana": None, "periodo": None, "hora": None}
+
+    def extrair_horario_escolhido(self, mensagem_paciente: str, horarios_oferecidos: list):
+        """
+        A partir de uma lista de horários oferecidos, identifica qual deles o paciente escolheu.
+        """
+        horarios_formatados = [
+            f"'{django_timezone.localtime(h).strftime('%A, dia %d, às %H:%M')}'" 
+            for h in horarios_oferecidos
+        ]
+        
+        prompt = f"""
+        Analise a mensagem do paciente e determine qual dos horários da lista ele escolheu.
+        Responda APENAS com o horário escolhido, exatamente como ele aparece na lista.
+        Se a mensagem do paciente não corresponder a nenhum horário, responda com "NENHUM".
+
+        Lista de horários oferecidos:
+        {", ".join(horarios_formatados)}
+
+        Mensagem do paciente: "{mensagem_paciente}"
+        """
+        response = self.model.generate_content(prompt)
+        escolha = response.text.strip().replace("'", "")
+
+        if escolha == "NENHUM":
+            return None
+
+        # Encontra o objeto datetime original que corresponde à string escolhida
+        for horario_obj in horarios_oferecidos:
+            if django_timezone.localtime(horario_obj).strftime('%A, dia %d, às %H:%M') == escolha:
+                return horario_obj
+        
+        return None
 
     def encontrar_horarios_disponiveis(self, preferencias=None):
         """

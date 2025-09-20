@@ -19,6 +19,12 @@
             exact
           />
           <q-route-tab
+            name="equipe"
+            label="Equipe"
+            to="/dashboard/config/equipe"
+            exact
+          />
+          <q-route-tab
             name="perfil"
             label="Meu Perfil"
             to="/dashboard/config/perfil"

@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework_nested import routers
-from .views import ProfissionalViewSet, PacienteViewSet
+from .views import ProfissionalViewSet, PacienteViewSet, ProfissionalLogadoView 
 from apps.prontuario.urls import router as prontuario_router
 from apps.agenda.nested_urls import router as agenda_nested_router
 from apps.documentos.urls import router as documentos_router
@@ -19,6 +19,7 @@ pacientes_router.registry.extend(documentos_router.registry)
 pacientes_router.registry.extend(financas_router.registry)
 
 urlpatterns = [
+    path('profissionais/me/', ProfissionalLogadoView.as_view(), name='profissional-logado'),
     path('', include(router.urls)),
     path('', include(pacientes_router.urls)),
 ]

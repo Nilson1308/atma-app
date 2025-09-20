@@ -3,8 +3,8 @@ from .models import Servico, Transacao
 
 @admin.register(Servico)
 class ServicoAdmin(admin.ModelAdmin):
-    list_display = ('nome_servico', 'valor_padrao', 'duracao_padrao', 'ativo', 'profissional')
-    list_filter = ('ativo', 'profissional')
+    list_display = ('nome_servico', 'valor_padrao', 'duracao_padrao', 'ativo', 'conta')
+    list_filter = ('ativo', 'conta')
     search_fields = ('nome_servico', 'descricao')
     ordering = ('nome_servico',)
 

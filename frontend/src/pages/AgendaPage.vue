@@ -82,6 +82,7 @@
 </template>
 
 <script setup>
+import { useAuthStore } from 'src/stores/auth'
 import { ref, onMounted, reactive, nextTick } from 'vue'
 import FullCalendar from '@fullcalendar/vue3'
 import dayGridPlugin from '@fullcalendar/daygrid'
@@ -91,6 +92,7 @@ import { api } from 'boot/axios'
 import { Notify, Dialog } from 'quasar'
 import AgendamentoForm from 'src/components/AgendamentoForm.vue'
 
+const authStore = useAuthStore()
 const fullCalendar = ref(null)
 const calendarTitle = ref('')
 const viewName = ref('timeGridWeek')
@@ -167,13 +169,28 @@ async function fetchHorariosTrabalho() {
 async function fetchAgendamentos() {
   try {
     const response = await api.get('/agendamentos/')
-    calendarOptions.events = response.data.map(ag => ({
-      id: ag.id,
-      title: ag.titulo,
-      start: ag.data_hora_inicio,
-      end: ag.data_hora_fim,
-      extendedProps: { ...ag }
-    }))
+    
+    // Esta verificação agora vai funcionar, pois os dados da assinatura virão da API
+    const isPremiumOwner = authStore.user?.funcao === 'proprietario';
+
+    calendarOptions.events = response.data.map(ag => {
+      let eventTitle = ag.titulo;
+
+      // Se for proprietário, adiciona o nome do profissional ao evento
+      if (isPremiumOwner && ag.profissional !== authStore.user.id) {
+        // Pega o primeiro nome
+        const nomeProfissional = ag.profissional_nome ? ag.profissional_nome.split(' ')[0] : 'N/A';
+        eventTitle = `[${nomeProfissional}] ${ag.titulo}`;
+      }
+
+      return {
+        id: ag.id,
+        title: eventTitle,
+        start: ag.data_hora_inicio,
+        end: ag.data_hora_fim,
+        extendedProps: { ...ag }
+      }
+    })
   } catch (error) {
     console.error('Erro ao buscar agendamentos:', error)
     Notify.create({ color: 'negative', message: 'Não foi possível carregar os agendamentos.' })

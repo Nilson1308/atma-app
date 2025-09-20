@@ -6,9 +6,9 @@
           <q-input
             label="Nome Completo *"
             v-model="formData.nome_completo"
-            dense
-            outlined
+            filled
             :rules="[val => !!val || 'Campo obrigatório']"
+            class="q-mb-md"
           />
         </div>
         <div class="col-12 col-sm-6">
@@ -120,12 +120,11 @@ const formData = ref({
   contato_telefone: '',
   email: '',
   endereco: '',
-  dia_cobranca: null // <-- NOVO CAMPO
+  dia_cobranca: null
 })
 
 const isEditing = computed(() => !!props.paciente)
 
-// Zera os dados do formulário
 function resetForm() {
   formData.value = {
     nome_completo: '',
@@ -134,16 +133,19 @@ function resetForm() {
     contato_telefone: '',
     email: '',
     endereco: '',
-    dia_cobranca: null // <-- NOVO CAMPO
+    dia_cobranca: null
   }
 }
 
 watch(() => props.paciente, (newVal) => {
   if (newVal) {
     formData.value = { ...newVal }
-    // Converte a data do formato AAAA-MM-DD para DD/MM/AAAA
     if (formData.value.data_nascimento) {
-      const formattedDate = date.formatDate(formData.value.data_nascimento, 'DD/MM/YYYY')
+      // --- CORREÇÃO DE EXIBIÇÃO ---
+      // Adiciona um horário para evitar que a data seja interpretada no dia anterior
+      // devido ao fuso horário ao carregar os dados.
+      const dataAjustada = `${newVal.data_nascimento}T12:00:00`
+      const formattedDate = date.formatDate(dataAjustada, 'DD/MM/YYYY')
       formData.value.data_nascimento = formattedDate
     }
   } else {
@@ -152,10 +154,16 @@ watch(() => props.paciente, (newVal) => {
 }, { immediate: true })
 
 
+// --- FUNÇÃO CORRIGIDA ---
 function formatDataForAPI(data) {
   if (!data || !/^\d{2}\/\d{2}\/\d{4}$/.test(data)) return null
-  // Converte a data do formato DD/MM/AAAA para AAAA-MM-DD
-  return date.formatDate(data, 'YYYY-MM-DD')
+  
+  // Converte a data do formato DD/MM/AAAA para um objeto Date
+  const dateObject = date.extractDate(data, 'DD/MM/YYYY')
+  
+  // Formata o objeto Date para o formato AAAA-MM-DD que a API espera
+  // A adição do timezone UTC na formatação garante que o dia correto seja enviado
+  return date.formatDate(dateObject, 'YYYY-MM-DD')
 }
 
 async function submitForm() {
@@ -164,7 +172,6 @@ async function submitForm() {
     const dataToSend = {
       ...formData.value,
       data_nascimento: formatDataForAPI(formData.value.data_nascimento),
-      // Garante que o valor seja nulo se o campo estiver vazio
       dia_cobranca: formData.value.dia_cobranca || null
     }
 

@@ -17,11 +17,9 @@ class EntradaProntuarioViewSet(viewsets.ModelViewSet):
         """
         paciente_pk = self.kwargs.get('paciente_pk')
         try:
-            # Garante que o paciente existe e pertence ao profissional logado
-            paciente = Paciente.objects.get(pk=paciente_pk, cadastrado_por=self.request.user)
+            paciente = Paciente.objects.get(pk=paciente_pk, conta=self.request.user.conta)
             return EntradaProntuario.objects.filter(paciente=paciente)
         except Paciente.DoesNotExist:
-            # Retorna um queryset vazio se o paciente não for encontrado ou não pertencer ao profissional
             return EntradaProntuario.objects.none()
 
     def perform_create(self, serializer):
@@ -31,10 +29,8 @@ class EntradaProntuarioViewSet(viewsets.ModelViewSet):
         """
         paciente_pk = self.kwargs.get('paciente_pk')
         try:
-            paciente = Paciente.objects.get(pk=paciente_pk, cadastrado_por=self.request.user)
+            paciente = Paciente.objects.get(pk=paciente_pk, conta=self.request.user.conta)
             serializer.save(profissional=self.request.user, paciente=paciente)
         except Paciente.DoesNotExist:
-            # Lança um erro de permissão se o profissional tentar criar um prontuário
-            # para um paciente que não é seu.
             raise permissions.PermissionDenied("Você não tem permissão para adicionar um prontuário para este paciente.")
 

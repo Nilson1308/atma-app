@@ -149,10 +149,16 @@ import { ref, watch } from 'vue'
 import { api } from 'boot/axios'
 import { Notify, date } from 'quasar'
 
-// --- 1. RECEBE A NOVA PROPRIEDADE ---
 const props = defineProps({
-  agendamento: Object,
-  dataSelecionada: Date,
+  agendamento: {
+    type: Object,
+    default: null
+  },
+  dataSelecionada: {
+    type: Date,
+    default: null
+  },
+  // Adicionado para validação, vindo da AgendaPage
   horariosTrabalho: {
     type: Array,
     default: () => []
@@ -172,34 +178,27 @@ const horaFim = ref(null)
 
 const opcoesStatus = [ 'Agendado', 'Confirmado', 'Cancelado', 'Realizado', 'Não Compareceu' ]
 
-
 watch(() => props.agendamento, (novoAgendamento) => {
   if (novoAgendamento) {
+    // Lógica para editar um agendamento existente (sem alterações)
     agendamentoLocal.value = { ...novoAgendamento }
-
     const inicio = new Date(novoAgendamento.data_hora_inicio)
     const fim = new Date(novoAgendamento.data_hora_fim)
-
     dataAgendamento.value = date.formatDate(inicio, 'DD/MM/YYYY')
     horaInicio.value = date.formatDate(inicio, 'HH:mm')
     horaFim.value = date.formatDate(fim, 'HH:mm')
-
     if (novoAgendamento.paciente) {
       opcoesPacientes.value = [{ id: novoAgendamento.paciente, nome_completo: novoAgendamento.paciente_nome }]
     }
-
     if (novoAgendamento.servico) {
-      const servicoObj = {
-        id: novoAgendamento.servico,
-        nome_servico: novoAgendamento.servico_nome
-      };
+      const servicoObj = { id: novoAgendamento.servico, nome_servico: novoAgendamento.servico_nome };
       servicoSelecionado.value = servicoObj;
       opcoesServicos.value = [servicoObj];
     } else {
       servicoSelecionado.value = null;
     }
-
   } else {
+    // Lógica para um NOVO agendamento
     agendamentoLocal.value = {
       titulo: '',
       paciente: null,
@@ -208,23 +207,46 @@ watch(() => props.agendamento, (novoAgendamento) => {
     }
     servicoSelecionado.value = null
     dataAgendamento.value = props.dataSelecionada ? date.formatDate(props.dataSelecionada, 'DD/MM/YYYY') : null;
-    horaInicio.value = null
+    
+    // --- MELHORIA 1: PREENCHER CAMPO DE HORA AUTOMATICAMENTE ---
+    // Se uma data/hora foi clicada na agenda, já preenchemos o campo de hora inicial.
+    horaInicio.value = props.dataSelecionada ? date.formatDate(props.dataSelecionada, 'HH:mm') : null;
+    
     horaFim.value = null
   }
 }, { immediate: true })
 
 
+// --- MELHORIA 2: PREENCHER TÍTULO E HORA FINAL AO SELECIONAR SERVIÇO ---
+// Esta função observa mudanças na seleção do serviço.
 watch(servicoSelecionado, (novoServico) => {
-  if (!novoServico || !horaInicio.value) return;
+  // Se nenhum serviço for selecionado, não faz nada
+  if (!novoServico) return;
 
+  // Preenche o título do agendamento com o nome do serviço
   agendamentoLocal.value.titulo = novoServico.nome_servico
 
-  const [horas, minutos] = horaInicio.value.split(':')
-  const dataInicioObj = date.extractDate(`${dataAgendamento.value} ${horas}:${minutos}`, 'DD/MM/YYYY HH:mm')
-  const dataFimObj = date.addToDate(dataInicioObj, { minutes: novoServico.duracao_padrao })
-
-  horaFim.value = date.formatDate(dataFimObj, 'HH:mm')
+  // Se a hora de início já estiver definida, calcula a hora de término
+  if (horaInicio.value) {
+    // Converte a data e hora de início para um objeto Date
+    const dataInicioObj = date.extractDate(`${dataAgendamento.value} ${horaInicio.value}`, 'DD/MM/YYYY HH:mm')
+    // Adiciona a duração do serviço (em minutos) para encontrar a data/hora final
+    const dataFimObj = date.addToDate(dataInicioObj, { minutes: novoServico.duracao_padrao })
+    // Formata a hora final e atualiza o campo
+    horaFim.value = date.formatDate(dataFimObj, 'HH:mm')
+  }
 })
+
+// Bônus: Se o usuário mudar a hora de início DEPOIS de escolher um serviço,
+// a hora final é recalculada automaticamente.
+watch(horaInicio, (novaHora) => {
+  if (servicoSelecionado.value && novaHora) {
+    const dataInicioObj = date.extractDate(`${dataAgendamento.value} ${novaHora}`, 'DD/MM/YYYY HH:mm')
+    const dataFimObj = date.addToDate(dataInicioObj, { minutes: servicoSelecionado.value.duracao_padrao })
+    horaFim.value = date.formatDate(dataFimObj, 'HH:mm')
+  }
+})
+
 
 const filtrarPacientes = async (val, update) => {
   if (val.length < 2) {
@@ -254,56 +276,44 @@ const filtrarServicos = async (val, update) => {
   }
 }
 
-// --- 2. NOVA FUNÇÃO DE VALIDAÇÃO ---
+// Lógica de validação e submissão (sem alterações)
 function isHorarioPermitido(dataParaVerificar) {
   const diaDaSemana = dataParaVerificar.getDay(); // 0=Domingo, 1=Segunda...
   const hora = dataParaVerificar.toTimeString().substring(0, 8);
-
   const regraDoDia = props.horariosTrabalho.find(bh => bh.daysOfWeek.includes(diaDaSemana));
-
-  if (!regraDoDia) {
-    return false;
-  }
+  if (!regraDoDia) return false;
   return hora >= regraDoDia.startTime && hora < regraDoDia.endTime;
 }
 
 const submitForm = async () => {
-  // --- 3. VALIDAÇÃO ANTES DE ENVIAR ---
   const dataInicioObj = date.extractDate(`${dataAgendamento.value} ${horaInicio.value}`, 'DD/MM/YYYY HH:mm')
-  
   if (!isHorarioPermitido(dataInicioObj)) {
     Notify.create({
       color: 'negative',
       icon: 'o_block',
       message: 'O horário selecionado está fora do expediente de trabalho configurado.'
     })
-    return; // Impede o envio do formulário
+    return;
   }
-
   try {
     const dataISO = date.formatDate(dataInicioObj, 'YYYY-MM-DD')
-
     const payload = {
       ...agendamentoLocal.value,
       servico: servicoSelecionado.value ? servicoSelecionado.value.id : null,
       data_hora_inicio: `${dataISO}T${horaInicio.value}:00`,
       data_hora_fim: `${dataISO}T${horaFim.value}:00`
     }
-
     if (agendamentoLocal.value.id) {
       await api.put(`/agendamentos/${agendamentoLocal.value.id}/`, payload)
     } else {
       await api.post('/agendamentos/', payload)
     }
-
     Notify.create({
       message: `Agendamento ${agendamentoLocal.value.id ? 'atualizado' : 'criado'} com sucesso!`,
       color: 'positive',
       icon: 'check_circle'
     })
-
     emit('agendamentoSalvo')
-
   } catch (error) {
     const errorMessage = error.response?.data ? JSON.stringify(error.response.data) : 'Ocorreu um erro desconhecido.'
     Notify.create({
@@ -314,5 +324,4 @@ const submitForm = async () => {
     console.error('Erro ao salvar agendamento:', error.response?.data || error)
   }
 }
-
 </script>

@@ -1,9 +1,12 @@
 from django.db import models
 from django.utils import timezone
-from apps.users.models import Profissional, Paciente
+# Importa a Conta e o Profissional do app users
+from apps.users.models import Profissional, Paciente, Conta
 
 class Servico(models.Model):
-    profissional = models.ForeignKey(Profissional, on_delete=models.CASCADE, related_name='servicos')
+    # --- CAMPO ALTERADO ---
+    # O serviço agora pertence a uma Conta/Clínica
+    conta = models.ForeignKey(Conta, on_delete=models.CASCADE, related_name='servicos')
     nome_servico = models.CharField(max_length=100)
     descricao = models.TextField(blank=True, null=True)
     duracao_padrao = models.IntegerField(help_text="Duração em minutos")
@@ -27,6 +30,7 @@ class Transacao(models.Model):
         ('Transferência', 'Transferência'),
     ]
 
+    # A transação continua ligada ao profissional que a realizou
     profissional = models.ForeignKey(Profissional, on_delete=models.CASCADE, related_name='transacoes')
     paciente = models.ForeignKey(Paciente, on_delete=models.PROTECT, related_name='transacoes')
     agendamento = models.ForeignKey('agenda.Agendamento', on_delete=models.SET_NULL, null=True, blank=True, related_name='transacao')
@@ -42,4 +46,3 @@ class Transacao(models.Model):
 
     def __str__(self):
         return f"Transação de {self.valor_cobrado} para {self.paciente.nome_completo}"
-

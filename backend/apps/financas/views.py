@@ -17,14 +17,13 @@ class ServicoViewSet(viewsets.ModelViewSet):
         """
         Retorna apenas os serviços que pertencem ao profissional logado.
         """
-        return Servico.objects.filter(profissional=self.request.user)
+        return Servico.objects.filter(conta=self.request.user.conta)
 
     def perform_create(self, serializer):
         """
         Associa o profissional logado automaticamente ao criar um novo serviço.
         """
-        serializer.save(profissional=self.request.user)
-
+        serializer.save(conta=self.request.user.conta)
 
 class TransacaoViewSet(viewsets.ModelViewSet):
     """
@@ -37,7 +36,7 @@ class TransacaoViewSet(viewsets.ModelViewSet):
         """
         Retorna apenas as transações que pertencem ao profissional logado.
         """
-        return Transacao.objects.filter(profissional=self.request.user)
+        return Transacao.objects.filter(profissional__conta=self.request.user.conta)
 
     @action(detail=False, methods=['post'], url_path='marcar-como-pago-em-lote')
     def marcar_como_pago_em_lote(self, request):
@@ -56,7 +55,7 @@ class TransacaoViewSet(viewsets.ModelViewSet):
 
         transacoes_para_pagar = Transacao.objects.filter(
             id__in=transacao_ids,
-            profissional=request.user,
+            profissional__conta=request.user.conta,
             status='pendente'
         )
 
@@ -92,5 +91,5 @@ class PacienteTransacaoViewSet(viewsets.ReadOnlyModelViewSet):
         paciente_pk = self.kwargs.get('paciente_pk')
         return Transacao.objects.filter(
             paciente__pk=paciente_pk,
-            profissional=self.request.user
+            paciente__conta=self.request.user.conta
         ).order_by('-data_transacao')

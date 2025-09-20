@@ -2,6 +2,8 @@ import os
 import traceback
 from django.http import HttpResponse
 from django.utils import timezone
+from datetime import timedelta 
+from django.core.cache import cache
 from rest_framework import permissions, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,7 +11,7 @@ from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 import google.generativeai as genai
 
-from apps.users.models import Paciente
+from apps.users.models import Paciente, Conta, Assinatura
 from .ia_manager import GeminiAIManager
 from .models import Agendamento
 from .serializers import AgendamentoSerializer
@@ -54,7 +56,22 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Agendamento.objects.filter(profissional=self.request.user)
+        """
+        Filtra os agendamentos com base no plano e na função do usuário.
+        - Plano Premium e função 'Profissional': Vê apenas os seus próprios agendamentos.
+        - Outros casos (ex: Proprietário, outros planos): Vê todos os agendamentos da conta.
+        """
+        user = self.request.user
+        assinatura = user.conta.assinatura
+
+        # Verifica se a conta é Premium e se o usuário não é o proprietário
+        if assinatura.plano.nome == 'PREMIUM' and user.funcao == 'profissional':
+            print(f"--> [Agenda] Usuário {user.email} (Profissional Premium) vendo apenas sua agenda.")
+            return Agendamento.objects.filter(profissional=user)
+        
+        # Para todos os outros casos (Proprietários, planos não-Premium), mostra tudo da conta
+        print(f"--> [Agenda] Usuário {user.email} (Admin/Outro Plano) vendo a agenda completa da conta.")
+        return Agendamento.objects.filter(profissional__conta=user.conta)
 
     def perform_create(self, serializer):
         serializer.save(profissional=self.request.user)
@@ -88,7 +105,7 @@ class PacienteAgendamentoViewSet(viewsets.ReadOnlyModelViewSet):
         paciente_pk = self.kwargs.get('paciente_pk')
         return Agendamento.objects.filter(
             paciente__pk=paciente_pk,
-            profissional=self.request.user
+            paciente__conta=self.request.user.conta
         )
 
 class ConfirmarAgendamentoView(APIView):
@@ -130,88 +147,165 @@ class WhatsAppWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
-
-        profissional = paciente.cadastrado_por
-        try:
-            assinatura = profissional.assinatura
-            if not assinatura.ativa or assinatura.plano.nome == 'BASICO':
-                print(f"--> Ação Bloqueada: Profissional {profissional.email} está no plano BÁSICO ou sem assinatura ativa.")
-                # Não faz nada. A mensagem do paciente será ignorada pela IA.
-                return Response({"status": "plano_incompativel"})
-        except Assinatura.DoesNotExist:
-            print(f"--> Ação Bloqueada: Profissional {profissional.email} não possui assinatura.")
-            return Response({"status": "sem_assinatura"})
-            
         print("\n" + "="*20 + " WEBHOOK INICIADO " + "="*20)
         try:
-            remetente = request.data.get('From', '')
+            remetente_full = request.data.get('From', '') # Formato: whatsapp:+55...
+            destinatario_full = request.data.get('To', '')   # Formato: whatsapp:+55...
             corpo_mensagem_original = request.data.get('Body', '').strip()
-            corpo_mensagem_upper = corpo_mensagem_original.upper()
-            print(f"Recebido de: {remetente}, Mensagem: '{corpo_mensagem_original}'")
+            
+            remetente_num = ''.join(filter(str.isdigit, remetente_full))
+            destinatario_num = ''.join(filter(str.isdigit, destinatario_full))
 
-            numero_paciente_webhook = ''.join(filter(str.isdigit, remetente))[-11:]
-            if not numero_paciente_webhook or not corpo_mensagem_original:
-                return Response({"status": "erro"}, status=400)
+            print(f"Recebido de: {remetente_num}, Para: {destinatario_num}, Mensagem: '{corpo_mensagem_original}'")
 
-            paciente = next((p for p in Paciente.objects.filter(contato_telefone__isnull=False) if ''.join(filter(str.isdigit, p.contato_telefone)).endswith(numero_paciente_webhook)), None)
+            if not remetente_num or not corpo_mensagem_original:
+                return Response({"status": "dados_insuficientes"}, status=400)
+
+            # --- FLUXOGRAMA PASSO 1: IDENTIFICAR A CLÍNICA (CONTA) E O PACIENTE ---
+            try:
+                conta = Conta.objects.get(whatsapp_number=destinatario_num)
+            except Conta.DoesNotExist:
+                print(f"--> Erro Crítico: Nenhum profissional/conta associado ao número de destino {destinatario_num}")
+                return Response({"status": "conta_nao_encontrada"})
+            
+            paciente = Paciente.objects.filter(conta=conta, contato_telefone__contains=remetente_num).first()
+            
             if not paciente:
-                raise Paciente.DoesNotExist
-            
-            print(f"Passo 2: Paciente encontrado: {paciente.nome_completo}")
-            ai_manager = GeminiAIManager(profissional=paciente.cadastrado_por)
+                return self.handle_novo_contato(request, conta, remetente_full, corpo_mensagem_original)
+            else:
+                return self.handle_paciente_existente(request, paciente, corpo_mensagem_original)
 
-            # --- FLUXO 1: RESPOSTA A UM LEMBRETE DE CONFIRMAÇÃO ---
-            agendamento_pendente = Agendamento.objects.filter(paciente=paciente, status__in=['Agendado'], data_hora_inicio__gte=timezone.now()).order_by('data_hora_inicio').first()
-            if agendamento_pendente:
-                if corpo_mensagem_upper == 'SIM':
-                    print("--> Ação: Confirmação de agendamento.")
-                    agendamento_pendente.status = 'Confirmado'
-                    agendamento_pendente.save()
-                    responder_paciente_via_whatsapp(paciente.contato_telefone, "Obrigado por confirmar! Sua consulta está garantida.")
-                    return Response({"status": "confirmado"}) # <-- Finaliza aqui
-
-                if corpo_mensagem_upper == 'NÃO' or corpo_mensagem_upper == 'REAGENDAR':
-                    print("--> Ação: Cancelamento e início de reagendamento.")
-                    agendamento_pendente.status = 'Cancelado'
-                    agendamento_pendente.save()
-                    # A mensagem será tratada como um novo pedido de agendamento pelo fluxo abaixo
-            
-            # --- FLUXO 2: CONVERSA DE AGENDAMENTO (NOVO OU CONTINUAÇÃO) ---
-            analise = ai_manager.analisar_mensagem_paciente(corpo_mensagem_original)
-            intent = analise.get('intent')
-            print(f"--> Análise da IA: {analise}")
-
-            if intent == "AGENDAR" or (agendamento_pendente and (corpo_mensagem_upper == 'NÃO' or corpo_mensagem_upper == 'REAGENDAR')):
-                print("--> Ação: Iniciar agendamento. Perguntando preferências...")
-                resposta_ia = ai_manager.gerar_pergunta_preferencia(paciente.nome_completo)
-                responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
-                return Response({"status": "aguardando_preferencia"})
-
-            elif intent == "AGENDAR_COM_PREFERENCIA":
-                print("--> Ação: Paciente informou uma preferência.")
-                preferencias = ai_manager.extrair_preferencias(corpo_mensagem_original)
-                print(f"--> Preferências extraídas: {preferencias}")
-                
-                horarios = ai_manager.encontrar_horarios_disponiveis(preferencias)
-                resposta_ia = ai_manager.gerar_resposta_com_horarios(paciente.nome_completo, horarios)
-                responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
-                return Response({"status": "horarios_enviados"})
-
-            elif intent == "ESCOLHEU_HORARIO":
-                print("--> Ação: Paciente escolheu um horário (implementação futura).")
-                resposta_ia = "Perfeito! Só um momento enquanto eu confirmo e finalizo o seu agendamento."
-                responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
-                return Response({"status": "confirmacao_pendente"})
-
-            else: # DUVIDA ou DESCONHECIDO
-                print("--> Ação: Intenção não é de agendamento.")
-                return Response({"status": "info"})
-
-        except Paciente.DoesNotExist:
-            return Response({"status": "erro", "mensagem": "Paciente não encontrado."}, status=404)
         except Exception as e:
             traceback.print_exc()
-            return Response({"status": "erro", "mensagem": "Erro interno do servidor."}, status=500)
+            return Response({"status": "erro_geral", "mensagem": str(e)}, status=500)
+
+    def handle_paciente_existente(self, request, paciente, corpo_mensagem_original):
+        print(f"--> Ação: Lidando com paciente existente: {paciente.nome_completo}")
+        
+        # 1. Verificação de Plano e Assinatura
+        try:
+            assinatura = paciente.conta.assinatura
+            if not assinatura.ativa or assinatura.plano.limite_mensagens_ia == 0:
+                print(f"--> Ação Bloqueada: Conta '{paciente.conta.nome_conta}' não tem um plano com IA ativa.")
+                return Response({"status": "plano_incompativel"})
+        except Assinatura.DoesNotExist:
+            print(f"--> Ação Bloqueada: Conta '{paciente.conta.nome_conta}' não possui assinatura.")
+            return Response({"status": "sem_assinatura"})
+
+        # 2. Inicialização da IA
+        profissional_responsavel = paciente.conta.proprietario
+        ai_manager = GeminiAIManager(profissional=profissional_responsavel)
+        corpo_mensagem_upper = corpo_mensagem_original.upper()
+
+        # 3. Lógica de Resposta a Lembretes
+        agendamento_pendente = Agendamento.objects.filter(paciente=paciente, status__in=['Agendado'], data_hora_inicio__gte=timezone.now()).order_by('data_hora_inicio').first()
+        if agendamento_pendente and (corpo_mensagem_upper in ['SIM', 'NÃO', 'REAGENDAR']):
+            if corpo_mensagem_upper == 'SIM':
+                agendamento_pendente.status = 'Confirmado'
+                agendamento_pendente.save()
+                responder_paciente_via_whatsapp(paciente.contato_telefone, "Obrigado por confirmar! Sua consulta está garantida.")
+                return Response({"status": "confirmado"})
+            if corpo_mensagem_upper in ['NÃO', 'REAGENDAR']:
+                agendamento_pendente.status = 'Cancelado'
+                agendamento_pendente.save()
+
+        # 4. Lógica de Conversa de Agendamento
+        cache_key = f"horarios_oferecidos_{paciente.id}"
+        horarios_oferecidos_cache = cache.get(cache_key)
+        analise = ai_manager.analisar_mensagem_paciente(corpo_mensagem_original, horarios_oferecidos_cache)
+        intent = analise.get('intent')
+        print(f"--> Análise (Paciente Existente): {analise}")
+
+        if intent == "ESCOLHEU_HORARIO" and horarios_oferecidos_cache:
+            horario_escolhido_utc = ai_manager.extrair_horario_escolhido(corpo_mensagem_original, horarios_oferecidos_cache)
+            if horario_escolhido_utc:
+                Agendamento.objects.create(paciente=paciente, profissional=profissional_responsavel, titulo="Consulta agendada pela IA", data_hora_inicio=horario_escolhido_utc, data_hora_fim=horario_escolhido_utc + timedelta(hours=1), status='Confirmado')
+                data_local_formatada = timezone.localtime(horario_escolhido_utc).strftime('%A, %d de %B às %H:%M')
+                resposta_ia = f"Perfeito, {paciente.nome_completo.split(' ')[0]}! Seu agendamento para {data_local_formatada} está confirmado. Até lá!"
+                responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
+                cache.delete(cache_key)
+                return Response({"status": "agendamento_criado"})
+
+        if intent == "AGENDAR_COM_PREFERENCIA":
+            preferencias = ai_manager.extrair_preferencias(corpo_mensagem_original)
+            horarios = ai_manager.encontrar_horarios_disponiveis(preferencias)
+            cache.set(cache_key, horarios, 600)
+            resposta_ia = ai_manager.gerar_resposta_com_horarios(paciente.nome_completo, horarios)
+            responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
+            return Response({"status": "horarios_enviados"})
+
+        if intent == "AGENDAR" or (agendamento_pendente and (corpo_mensagem_upper in ['NÃO', 'REAGENDAR'])):
+            resposta_ia = ai_manager.gerar_pergunta_preferencia(paciente.nome_completo)
+            responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
+            return Response({"status": "aguardando_preferencia"})
+        
+        if intent == "SAUDACAO":
+            resposta_ia = f"Olá, {paciente.nome_completo.split(' ')[0]}, tudo bem? Como posso te ajudar hoje?"
+            responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
+            return Response({"status": "saudacao_respondida"})
+
+        return Response({"status": "paciente_existente_info"})
+
+
+    def handle_novo_contato(self, request, conta, remetente_full, corpo_mensagem_original):
+        print(f"--> Ação: Lidando com novo contato: {remetente_full}")
+        
+        remetente_num = ''.join(filter(str.isdigit, remetente_full))
+        cache_key_state = f"novo_contato_state_{remetente_num}"
+        cache_key_data = f"novo_contato_data_{remetente_num}"
+        
+        estado_conversa = cache.get(cache_key_state)
+        dados_conversa = cache.get(cache_key_data) or {}
+
+        profissional_responsavel = conta.proprietario
+        ai_manager = GeminiAIManager(profissional=profissional_responsavel)
+
+        if estado_conversa == 'AWAITING_NAME':
+            novo_paciente, created = Paciente.objects.get_or_create(
+                conta=conta, contato_telefone=remetente_num,
+                defaults={'nome_completo': corpo_mensagem_original, 'cadastrado_por': profissional_responsavel}
+            )
+            print(f"--> Novo paciente {'criado' if created else 'encontrado'}: {novo_paciente.nome_completo}")
+
+            horario_escolhido_utc = dados_conversa.get('horario_escolhido')
+            Agendamento.objects.create(
+                paciente=novo_paciente, profissional=profissional_responsavel, titulo="Primeira consulta",
+                data_hora_inicio=horario_escolhido_utc, data_hora_fim=horario_escolhido_utc + timedelta(hours=1), status='Confirmado'
+            )
+            data_local_formatada = timezone.localtime(horario_escolhido_utc).strftime('%A, %d de %B às %H:%M')
+            resposta_ia = f"Perfeito, {novo_paciente.nome_completo.split(' ')[0]}! Seu primeiro agendamento para {data_local_formatada} está confirmado. Estamos ansiosos para te receber!"
+            responder_paciente_via_whatsapp(remetente_full, resposta_ia)
+            
+            cache.delete(cache_key_state)
+            cache.delete(cache_key_data)
+            return Response({"status": "novo_paciente_agendado"})
+
+        analise = ai_manager.analisar_mensagem_paciente(corpo_mensagem_original, dados_conversa.get('horarios_oferecidos'))
+        intent = analise.get('intent')
+        print(f"--> Análise (Novo Contato): {analise}")
+
+        if intent == "ESCOLHEU_HORARIO" and dados_conversa.get('horarios_oferecidos'):
+            horario_escolhido = ai_manager.extrair_horario_escolhido(corpo_mensagem_original, dados_conversa['horarios_oferecidos'])
+            if horario_escolhido:
+                dados_conversa['horario_escolhido'] = horario_escolhido
+                cache.set(cache_key_data, dados_conversa, 600)
+                cache.set(cache_key_state, 'AWAITING_NAME', 600)
+                resposta_ia = ai_manager.gerar_pergunta_nome_completo()
+                responder_paciente_via_whatsapp(remetente_full, resposta_ia)
+                return Response({"status": "aguardando_nome"})
+
+        if intent in ["AGENDAR", "AGENDAR_COM_PREFERENCIA"]:
+            preferencias = ai_manager.extrair_preferencias(corpo_mensagem_original)
+            horarios = ai_manager.encontrar_horarios_disponiveis(preferencias)
+            dados_conversa['horarios_oferecidos'] = horarios
+            cache.set(cache_key_data, dados_conversa, 600)
+            resposta_ia = ai_manager.gerar_resposta_com_horarios("você", horarios)
+            responder_paciente_via_whatsapp(remetente_full, resposta_ia)
+            return Response({"status": "horarios_enviados_novo_contato"})
+
+        resposta_padrao = f"Olá! Sou a assistente virtual de {conta.nome_conta}. Como posso te ajudar a agendar sua primeira consulta?"
+        responder_paciente_via_whatsapp(remetente_full, resposta_padrao)
+        return Response({"status": "novo_contato_info"})
 
 from .models import HorarioTrabalho, ExcecaoHorario
 from .serializers import HorarioTrabalhoSerializer, ExcecaoHorarioSerializer
