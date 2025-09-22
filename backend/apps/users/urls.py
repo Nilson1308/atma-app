@@ -1,15 +1,18 @@
 from django.urls import path, include
 from rest_framework_nested import routers
-from .views import ProfissionalViewSet, PacienteViewSet, ProfissionalLogadoView 
+from rest_framework.routers import DefaultRouter
+from .views import ProfissionalViewSet, PacienteViewSet, ProfissionalLogadoView, CategoriaFAQViewSet, ItemFAQViewSet 
 from apps.prontuario.urls import router as prontuario_router
 from apps.agenda.nested_urls import router as agenda_nested_router
 from apps.documentos.urls import router as documentos_router
 from apps.financas.nested_urls import router as financas_router
 
 # Router principal para usuários e pacientes
-router = routers.SimpleRouter()
+router = DefaultRouter()
 router.register(r'profissionais', ProfissionalViewSet, basename='profissional')
 router.register(r'pacientes', PacienteViewSet, basename='paciente')
+router.register(r'faq-categorias', CategoriaFAQViewSet, basename='faq-categoria')
+router.register(r'faq-itens', ItemFAQViewSet, basename='faq-item')
 
 # Cria um router aninhado para os prontuários, agendamentos e documentos
 pacientes_router = routers.NestedSimpleRouter(router, r'pacientes', lookup='paciente')

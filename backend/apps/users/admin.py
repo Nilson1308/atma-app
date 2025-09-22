@@ -1,10 +1,14 @@
 from django.contrib import admin
-from .models import Profissional, Paciente, Conta, Plano, Assinatura, CategoriaFAQ, ItemFAQ
+from .models import Profissional, Paciente, Conta, Plano, Assinatura, CategoriaFAQ, ItemFAQ, PerfilClinica
 
 @admin.register(Conta)
 class ContaAdmin(admin.ModelAdmin):
     list_display = ('nome_conta', 'proprietario', 'data_criacao')
     search_fields = ('nome_conta', 'proprietario__nome_completo')
+
+@admin.register(PerfilClinica)
+class PerfilClinicaAdmin(admin.ModelAdmin):
+    list_display = ('conta', 'site_url', 'instagram_handle')
 
 @admin.register(Plano)
 class PlanoAdmin(admin.ModelAdmin):

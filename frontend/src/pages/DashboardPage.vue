@@ -64,6 +64,32 @@
               <q-btn flat color="primary" to="/dashboard/agenda" label="Ver Agenda Completa" />
             </q-card-actions>
           </q-card>
+
+          <q-card class="q-mb-lg" v-if="solicitacoesPendentes.length > 0">
+            <q-card-section>
+              <div class="text-h6 text-orange-8 row items-center">
+                <q-icon name="o_priority_high" class="q-mr-sm" />
+                Ações Pendentes
+              </div>
+            </q-card-section>
+            <q-list separator>
+              <q-item v-for="sol in solicitacoesPendentes" :key="sol.id">
+                <q-item-section>
+                  <q-item-label>{{ sol.paciente.nome_completo }}</q-item-label>
+                  <q-item-label caption>Solicitou: {{ sol.tipo_solicitacao }}</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                   <q-btn
+                      size="sm"
+                      color="positive"
+                      label="Concluir"
+                      @click="concluirSolicitacao(sol)"
+                      no-caps
+                    />
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </q-card>
         </div>
 
         <!-- Coluna da Direita -->
@@ -113,16 +139,22 @@ import { ref, onMounted } from 'vue'
 import { useAuthStore } from 'stores/auth'
 import { api } from 'boot/axios'
 import { Notify } from 'quasar'
+import { Dialog } from 'quasar'
 
 const authStore = useAuthStore()
 const loading = ref(true)
 const dashboardData = ref({})
+const solicitacoesPendentes = ref([])
 
 const fetchDashboardData = async () => {
   loading.value = true
   try {
-    const response = await api.get('/dashboard/')
-    dashboardData.value = response.data
+    const [dashboardResponse, solicitacoesResponse] = await Promise.all([
+      api.get('/dashboard/'),
+      api.get('/solicitacoes/?status=PENDENTE')
+    ]);
+    dashboardData.value = dashboardResponse.data
+    solicitacoesPendentes.value = solicitacoesResponse.data
   } catch (error) {
     console.error('Erro ao buscar dados do dashboard:', error)
     Notify.create({
@@ -133,6 +165,24 @@ const fetchDashboardData = async () => {
   } finally {
     loading.value = false
   }
+}
+
+async function concluirSolicitacao(solicitacao) {
+  Dialog.create({
+    title: 'Confirmar Conclusão',
+    message: `Você confirma que a solicitação de "${solicitacao.tipo_solicitacao}" para o paciente ${solicitacao.paciente.nome_completo} foi atendida?`,
+    cancel: true,
+    persistent: true
+  }).onOk(async () => {
+    try {
+      await api.patch(`/solicitacoes/${solicitacao.id}/`, { status: 'CONCLUIDO' })
+      Notify.create({ color: 'positive', message: 'Solicitação marcada como concluída!' })
+      await fetchDashboardData() // Atualiza o dashboard
+    } catch (error) {
+      console.error('Erro ao concluir solicitação:', error)
+      Notify.create({ color: 'negative', message: 'Erro ao atualizar a solicitação.' })
+    }
+  })
 }
 
 const formatCurrency = (value) => {

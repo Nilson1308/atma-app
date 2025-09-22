@@ -1,7 +1,9 @@
 import os
 import google.generativeai as genai
-from apps.users.models import Profissional
+from apps.users.models import Profissional, Conta, ItemFAQ, PerfilClinica
+from apps.financas.models import Servico
 from apps.agenda.models import Agendamento, HorarioTrabalho, ExcecaoHorario
+from apps.solicitacoes.models import Solicitacao
 from datetime import timedelta, time, datetime, timezone
 import json
 from django.utils import timezone as django_timezone
@@ -19,6 +21,98 @@ class GeminiAIManager:
     def __init__(self, profissional: Profissional):
         self.profissional = profissional
         self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+    def identificar_intencao_geral(self, mensagem_paciente: str, conta: Conta):
+        """
+        Primeiro passo: Tenta classificar a mensagem em uma intenção de alto nível.
+        """
+        itens_faq = ItemFAQ.objects.filter(conta=conta)
+        intencoes_cadastradas = "\n".join([f"- {item.intencao_chave}: {item.perguntas_exemplo}" for item in itens_faq])
+
+        prompt = f"""
+        Analise a mensagem do paciente e classifique-a em uma das intenções abaixo.
+        Se for sobre agendamento, use as intenções de agendamento.
+        Se corresponder a uma das intenções do FAQ, use a chave da intenção.
+
+        Intenções de Agendamento:
+        - SAUDACAO: Se for apenas um cumprimento ou uma mensagem genérica sem um pedido claro. (Ex: "oi, bom dia", "olá", "tudo bem?")
+        - AGENDAR: Se o paciente quer marcar uma consulta, mas não especificou um dia ou período.
+        - AGENDAR_COM_PREFERENCIA: Se o paciente quer marcar e JÁ ESPECIFICOU um dia ou período.
+        - ESCOLHEU_HORARIO: Se a mensagem do paciente corresponde claramente a um dos horários específicos que foram oferecidos.
+
+        Intenções do FAQ da Clínica:
+        {intencoes_cadastradas}
+        
+        Se não se encaixar em nada, responda "DESCONHECIDO".
+
+        Mensagem: "{mensagem_paciente}"
+        Sua Resposta: 
+        """
+        response = self.model.generate_content(prompt)
+        return response.text.strip()
+
+    def buscar_e_gerar_resposta_faq(self, intencao_identificada: str, conta: Conta):
+        """
+        Busca a resposta no banco de dados, enriquece com dados dinâmicos se necessário,
+        e gera uma resposta amigável para o paciente.
+        """
+        try:
+            item_faq = ItemFAQ.objects.get(conta=conta, intencao_chave=intencao_identificada)
+            resposta_base = item_faq.resposta
+            contexto_dinamico = ""
+
+            # Se a intenção for sobre serviços, busca os serviços cadastrados.
+            if intencao_identificada == 'conhecer_servicos':
+                servicos = Servico.objects.filter(conta=conta, ativo=True)
+                if servicos.exists():
+                    lista_servicos = ", ".join([s.nome_servico for s in servicos])
+                    contexto_dinamico = f"Aqui estão os serviços que oferecemos: {lista_servicos}."
+                else:
+                    contexto_dinamico = "Ainda não temos uma lista de serviços cadastrada."
+
+            # Se a intenção for sobre localização, busca dados do perfil e horários.
+            elif intencao_identificada == 'localizacao_contato':
+                perfil = conta.perfil
+                horarios = HorarioTrabalho.objects.filter(profissional__conta=conta, ativo=True).order_by('dia_da_semana')
+                
+                info_perfil = f"O endereço é {perfil.endereco_completo or '[Endereço não informado]'}. O telefone para contato é {self.profissional.contato_telefone or '[Telefone não informado]'}. O site é {perfil.site_url or '[Site não informado]'}"
+                
+                if horarios.exists():
+                    texto_horarios = " Nosso horário de funcionamento é:"
+                    dias_semana = dict(HorarioTrabalho.DIAS_SEMANA)
+                    for h in horarios:
+                        texto_horarios += f" {dias_semana[h.dia_da_semana]} das {h.hora_inicio.strftime('%H:%M')} às {h.hora_fim.strftime('%H:%M')};"
+                    contexto_dinamico = info_perfil + texto_horarios
+                else:
+                    contexto_dinamico = info_perfil + ". O horário de funcionamento não foi cadastrado."
+
+            # Se a intenção for sobre profissionais, busca a equipe da conta.
+            elif intencao_identificada == 'conhecer_profissionais':
+                profissionais = Profissional.objects.filter(conta=conta, is_active=True)
+                lista_profissionais = ", ".join([p.nome_completo for p in profissionais])
+                contexto_dinamico = f"Nossa equipe é composta por: {lista_profissionais}."
+
+            # Monta o prompt final para a IA
+            prompt = f"""
+            Você é uma secretária virtual. Um paciente fez uma pergunta e esta é a informação correta para respondê-lo.
+            
+            **Resposta Padrão Cadastrada:**
+            "{resposta_base}"
+
+            **Informações Adicionais do Sistema (use se for relevante):**
+            {contexto_dinamico}
+
+            Sua tarefa é formular uma resposta amigável e natural para o paciente. Se houver informações adicionais, integre-as de forma fluida à resposta padrão.
+            Não inclua os colchetes como '[Endereço não informado]', apenas omita a informação se ela não existir.
+            """
+            response = self.model.generate_content(prompt)
+            return response.text.strip()
+            
+        except ItemFAQ.DoesNotExist:
+            return "Peço desculpas, mas não encontrei uma resposta para sua pergunta. Posso tentar ajudar com outra coisa?"
+        except Exception as e:
+            print(f"ERRO inesperado ao buscar resposta do FAQ: {e}")
+            return "Não consegui processar sua solicitação no momento. Por favor, tente novamente."
 
     def analisar_mensagem_paciente(self, mensagem_paciente: str, horarios_oferecidos: list = None):
         horarios_ofertados_str = "Nenhum horário foi oferecido ainda."
@@ -226,9 +320,8 @@ class GeminiAIManager:
         return horarios_encontrados
 
     def gerar_resposta_com_horarios(self, nome_paciente: str, horarios=None):
-        # --- PEQUENO AJUSTE AQUI ---
         if not horarios:
-            return f"Olá, {nome_paciente}! Puxa, não encontrei horários disponíveis com essa preferência. Gostaria de tentar outro dia ou período?"
+            return f"Olá, {nome_paciente}! Puxa, não encontrei horários disponíveis com essa preferência para os próximos 30 dias. Gostaria de tentar outro dia ou período? Se preferir, posso deixar seu nome em nossa lista de espera."
 
         horarios_formatados = [django_timezone.localtime(h).strftime('%A, dia %d, às %H:%M') for h in horarios]
         texto_horarios = "\n".join(f"• {h}" for h in horarios_formatados)
@@ -257,3 +350,35 @@ class GeminiAIManager:
         except Exception as e:
             print(f"Erro ao gerar resposta com a Gemini: {e}")
             return "Encontrei alguns horários. Poderia, por favor, ligar para confirmarmos?"
+
+    def registrar_solicitacao_paciente(self, intencao: str, conta: Conta, paciente: 'Paciente'):
+        """
+        Registra uma nova solicitação no banco de dados e retorna uma mensagem de confirmação.
+        """
+        mapa_intencao_tipo = {
+            'solicitar_receita': 'RECEITA',
+            'solicitar_atestado': 'ATESTADO',
+            'solicitar_recibo': 'RECIBO'
+        }
+        
+        tipo = mapa_intencao_tipo.get(intencao)
+        if not tipo:
+            return "Não entendi qual documento você precisa. Pode especificar?"
+
+        # Cria a solicitação no banco de dados
+        Solicitacao.objects.create(
+            conta=conta,
+            paciente=paciente,
+            profissional_atribuido=conta.proprietario, # Atribui ao proprietário por padrão
+            tipo_solicitacao=tipo
+        )
+
+        # Gera uma resposta de confirmação amigável
+        prompt = f"""
+        Você é uma secretária virtual. O paciente {paciente.nome_completo} acabou de solicitar um documento do tipo '{tipo}'.
+        Sua tarefa é gerar uma resposta curta e amigável confirmando que a solicitação foi registrada e será encaminhada ao profissional responsável.
+        
+        Exemplo: "Registrado! Sua solicitação de {tipo.lower()} foi encaminhada para o(a) Dr(a). {conta.proprietario.nome_completo}. Avisaremos assim que estiver pronto!"
+        """
+        response = self.model.generate_content(prompt)
+        return response.text.strip()

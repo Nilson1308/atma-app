@@ -1,6 +1,6 @@
-from rest_framework import viewsets, permissions, filters
-from .models import Profissional, Paciente
-from .serializers import ProfissionalSerializer, PacienteSerializer
+from rest_framework import viewsets, permissions, filters, generics
+from .models import Profissional, Paciente, CategoriaFAQ, ItemFAQ, PerfilClinica
+from .serializers import ProfissionalSerializer, PacienteSerializer, CategoriaFAQSerializer, ItemFAQSerializer, PerfilClinicaSerializer, PacienteSerializerSimple
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.utils import timezone
@@ -110,3 +110,54 @@ class ProfissionalLogadoView(APIView):
     def get(self, request):
         serializer = ProfissionalSerializer(request.user)
         return Response(serializer.data)
+
+class CategoriaFAQViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint para gerenciar as categorias do FAQ da conta.
+    """
+    serializer_class = CategoriaFAQSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return CategoriaFAQ.objects.filter(conta=self.request.user.conta).prefetch_related('itens')
+
+    def perform_create(self, serializer):
+        serializer.save(conta=self.request.user.conta)
+
+class ItemFAQViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint para gerenciar os itens do FAQ da conta.
+    """
+    serializer_class = ItemFAQSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return ItemFAQ.objects.filter(conta=self.request.user.conta)
+
+    def perform_create(self, serializer):
+        # Validação para garantir que a categoria pertence à mesma conta
+        categoria = serializer.validated_data.get('categoria')
+        if categoria.conta != self.request.user.conta:
+            raise permissions.PermissionDenied("Esta categoria não pertence à sua conta.")
+        serializer.save(conta=self.request.user.conta)
+
+class PerfilClinicaView(generics.RetrieveUpdateAPIView):
+    """
+    API endpoint para visualizar e editar o perfil da clínica/conta do usuário logado.
+    Permite GET para buscar e PATCH para atualizar parcialmente.
+    """
+    serializer_class = PerfilClinicaSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        """
+        Busca ou cria o perfil associado à conta do usuário logado.
+        Isso garante que cada conta tenha apenas um perfil.
+        """
+        conta = self.request.user.conta
+        obj, created = PerfilClinica.objects.get_or_create(conta=conta)
+        return obj
+
+    def perform_update(self, serializer):
+        # Garante que a conta não seja alterada durante a atualização.
+        serializer.save(conta=self.request.user.conta)

@@ -25,6 +25,12 @@
             exact
           />
           <q-route-tab
+            name="faq"
+            label="FAQ da IA"
+            to="/dashboard/config/faq"
+            exact
+          />
+          <q-route-tab
             name="perfil"
             label="Meu Perfil"
             to="/dashboard/config/perfil"

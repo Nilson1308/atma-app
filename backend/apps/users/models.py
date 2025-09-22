@@ -22,6 +22,24 @@ class Conta(models.Model):
     def __str__(self):
         return self.nome_conta
 
+def logo_directory_path(instance, filename):
+    # O arquivo será salvo em MEDIA_ROOT/conta_<id>/logo/<filename>
+    return f'conta_{instance.conta.id}/logo/{filename}'
+
+class PerfilClinica(models.Model):
+    """
+    Armazena os dados de perfil público da clínica/conta.
+    """
+    conta = models.OneToOneField(Conta, on_delete=models.CASCADE, related_name='perfil')
+    bio = models.TextField(blank=True, null=True, help_text="Uma breve descrição sobre a clínica ou profissional.")
+    endereco_completo = models.CharField(max_length=255, blank=True, null=True)
+    site_url = models.URLField(blank=True, null=True)
+    instagram_handle = models.CharField(max_length=100, blank=True, null=True, help_text="Apenas o nome de usuário, sem o '@'.")
+    logotipo = models.ImageField(upload_to=logo_directory_path, null=True, blank=True)
+    
+    def __str__(self):
+        return f"Perfil de {self.conta.nome_conta}"
+
 class Profissional(AbstractUser):
     """
     Modelo customizado de usuário para os profissionais de saúde.

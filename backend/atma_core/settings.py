@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'apps.prontuario',
     'apps.documentos',
     'apps.financas',
+    'apps.solicitacoes',
 ]
 
 MIDDLEWARE = [

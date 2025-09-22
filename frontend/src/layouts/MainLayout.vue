@@ -83,6 +83,7 @@ const links = ref([
   { icon: 'o_calendar_today', text: 'Agenda', to: '/dashboard/agenda' },
   { icon: 'o_medical_services', text: 'Meus Serviços', to: '/dashboard/servicos' },
   { icon: 'o_paid', text: 'Finanças', to: '/dashboard/financas' },
+  { icon: 'o_inbox', text: 'Solicitações', to: '/dashboard/solicitacoes' },
   { icon: 'o_settings', text: 'Configurações', to: '/dashboard/config/horarios' }
 ])
 

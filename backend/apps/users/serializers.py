@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Profissional, Paciente, Conta, Plano, Assinatura
+from .models import Profissional, Paciente, Conta, Plano, Assinatura, CategoriaFAQ, ItemFAQ, PerfilClinica
 
 class PlanoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -12,11 +12,17 @@ class AssinaturaSerializer(serializers.ModelSerializer):
         model = Assinatura
         fields = ['plano', 'ativa']
 
+class PerfilClinicaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PerfilClinica
+        fields = ['bio', 'endereco_completo', 'site_url', 'instagram_handle', 'logotipo']
+
 class ContaSerializer(serializers.ModelSerializer):
     assinatura = AssinaturaSerializer(read_only=True)
+    perfil = PerfilClinicaSerializer(read_only=True)
     class Meta:
         model = Conta
-        fields = ['id', 'nome_conta', 'assinatura']
+        fields = ['id', 'nome_conta', 'assinatura', 'perfil']
 
 class ProfissionalSerializer(serializers.ModelSerializer):
     """
@@ -53,3 +59,17 @@ class PacienteSerializerSimple(serializers.ModelSerializer):
     class Meta:
         model = Paciente
         fields = ['id', 'nome_completo']
+
+class ItemFAQSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemFAQ
+        fields = ['id', 'intencao_chave', 'perguntas_exemplo', 'resposta', 'categoria']
+        read_only_fields = ['conta']
+
+class CategoriaFAQSerializer(serializers.ModelSerializer):
+    itens = ItemFAQSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CategoriaFAQ
+        fields = ['id', 'nome', 'itens']
+        read_only_fields = ['conta']

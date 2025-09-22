@@ -16,6 +16,7 @@ const routes = [
       { path: 'agenda', component: () => import('pages/AgendaPage.vue') },
       { path: 'servicos', component: () => import('pages/ServicosPage.vue') },
       { path: 'financas', component: () => import('pages/FinancasPage.vue') },
+      { path: 'solicitacoes', component: () => import('pages/SolicitacoesPage.vue') },
       {
         path: 'config',
         component: () => import('pages/ConfiguracoesPage.vue'),
@@ -23,7 +24,8 @@ const routes = [
           { path: '', redirect: '/dashboard/config/horarios' }, 
           { path: 'horarios', component: () => import('pages/HorariosPage.vue') },
           { path: 'equipe', component: () => import('pages/EquipePage.vue') },
-          { path: 'perfil', component: () => import('pages/ErrorNotFound.vue') }, 
+          { path: 'faq', component: () => import('pages/FAQPage.vue') },
+          { path: 'perfil', component: () => import('pages/PerfilPage.vue') },
         ]
       }
     ]
