@@ -1,15 +1,16 @@
 import os
 import google.generativeai as genai
-from apps.users.models import Profissional, Conta, ItemFAQ, PerfilClinica
-from apps.financas.models import Servico
+from apps.users.models import Profissional, Conta, ItemFAQ, PerfilClinica, Paciente
+from apps.financas.models import Servico, Transacao
 from apps.agenda.models import Agendamento, HorarioTrabalho, ExcecaoHorario
 from apps.solicitacoes.models import Solicitacao
 from datetime import timedelta, time, datetime, timezone
 import json
 from django.utils import timezone as django_timezone
 from twilio.rest import Client
+import re # <-- Importe a biblioteca de expressões regulares
 
-# Configura a API da Gemini
+# (Mantenha a configuração da API da Gemini)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -33,6 +34,7 @@ class GeminiAIManager:
         Analise a mensagem do paciente e classifique-a em uma das intenções abaixo.
         Se for sobre agendamento, use as intenções de agendamento.
         Se corresponder a uma das intenções do FAQ, use a chave da intenção.
+        Se for uma pergunta sobre valores pendentes, use a intenção de finanças.
 
         Intenções de Agendamento:
         - SAUDACAO: Se for apenas um cumprimento ou uma mensagem genérica sem um pedido claro. (Ex: "oi, bom dia", "olá", "tudo bem?")
@@ -43,6 +45,9 @@ class GeminiAIManager:
         Intenções do FAQ da Clínica:
         {intencoes_cadastradas}
         
+        Intenção de Finanças:
+        - VERIFICAR_PENDENCIAS: Se o paciente está perguntando sobre débitos ou pagamentos pendentes. (Ex: "tenho algo para pagar?", "estou devendo alguma consulta?", "qual o valor em aberto?")
+
         Se não se encaixar em nada, responda "DESCONHECIDO".
 
         Mensagem: "{mensagem_paciente}"
@@ -50,7 +55,59 @@ class GeminiAIManager:
         """
         response = self.model.generate_content(prompt)
         return response.text.strip()
+    
+    # --- NOVA FUNÇÃO ---
+    def gerar_pergunta_onboarding(self, nome_paciente: str):
+        """ Gera a mensagem para solicitar os dados de onboarding. """
+        prompt = f"""
+        Você é uma secretária virtual. O novo paciente, {nome_paciente}, acabou de ter sua primeira consulta agendada.
+        Sua tarefa é gerar uma mensagem amigável para adiantar o cadastro dele, pedindo o CPF e a data de nascimento.
 
+        Exemplo de resposta:
+        "Perfeito, {nome_paciente}! Seu agendamento está confirmado. Para agilizar seu atendimento no dia, você poderia me informar seu CPF e data de nascimento, por favor? (Ex: 123.456.789-10 e 25/12/1990)"
+        """
+        response = self.model.generate_content(prompt)
+        return response.text.strip()
+
+    # --- NOVA FUNÇÃO ---
+    def extrair_dados_onboarding(self, mensagem: str):
+        """ Extrai CPF e Data de Nascimento da mensagem do paciente. """
+        cpf_pattern = r'\d{3}\.?\d{3}\.?\d{3}-?\d{2}'
+        data_pattern = r'\d{2}/\d{2}/\d{4}'
+        
+        cpf_match = re.search(cpf_pattern, mensagem)
+        data_match = re.search(data_pattern, mensagem)
+        
+        cpf = cpf_match.group(0) if cpf_match else None
+        data_nascimento = data_match.group(0) if data_match else None
+        
+        return {'cpf': cpf, 'data_nascimento': data_nascimento}
+        
+    # --- NOVA FUNÇÃO ---
+    def buscar_e_responder_pendencias(self, paciente: Paciente):
+        """ Consulta e gera uma resposta sobre as pendências financeiras do paciente. """
+        pendencias = Transacao.objects.filter(paciente=paciente, status='pendente')
+        
+        if not pendencias.exists():
+            return f"Verifiquei aqui, {paciente.nome_completo.split(' ')[0]}, e não há nenhum valor pendente em seu nome. Está tudo certo!"
+
+        total_pendente = pendencias.aggregate(total=models.Sum('valor_cobrado'))['total']
+        valor_formatado = f"R$ {total_pendente:.2f}".replace('.', ',')
+
+        prompt = f"""
+        Você é uma secretária virtual. O paciente {paciente.nome_completo} perguntou sobre seus débitos.
+        Você consultou o sistema e encontrou um valor total pendente de {valor_formatado}.
+        
+        Sua tarefa é formular uma resposta amigável informando o valor pendente. Ofereça ajuda para realizar o pagamento, como enviar um código PIX.
+        
+        Exemplo de resposta:
+        "Olá, {paciente.nome_completo.split(' ')[0]}! Verifiquei no sistema e consta um valor total de {valor_formatado} em aberto. Gostaria que eu enviasse o código PIX para facilitar o pagamento?"
+        """
+        response = self.model.generate_content(prompt)
+        return response.text.strip()
+    
+    # ...(O restante do arquivo ia_manager.py continua daqui, sem alterações)...
+    # Copie e cole o restante do seu arquivo ia_manager.py original abaixo desta linha.
     def buscar_e_gerar_resposta_faq(self, intencao_identificada: str, conta: Conta):
         """
         Busca a resposta no banco de dados, enriquece com dados dinâmicos se necessário,

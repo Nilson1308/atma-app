@@ -104,4 +104,21 @@ class ExcecaoHorario(models.Model):
 class LogMensagemIA(models.Model):
     assinatura = models.ForeignKey('users.Assinatura', on_delete=models.CASCADE, related_name='logs_mensagens')
     data_envio = models.DateTimeField(auto_now_add=True)
-    sid_twilio = models.CharField(max_length=255, unique=True) # ID da mensagem retornado pela Twilio
+    sid_twilio = models.CharField(max_length=255, unique=True)
+
+class FeedbackNPS(models.Model):
+    """ Armazena o feedback de NPS coletado dos pacientes. """
+    paciente = models.ForeignKey('users.Paciente', on_delete=models.CASCADE, related_name='feedbacks')
+    profissional = models.ForeignKey('users.Profissional', on_delete=models.CASCADE, related_name='feedbacks')
+    agendamento = models.OneToOneField(Agendamento, on_delete=models.CASCADE, related_name='feedback')
+    nota = models.IntegerField()
+    comentario = models.TextField(blank=True, null=True)
+    data_resposta = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Feedback NPS"
+        verbose_name_plural = "Feedbacks NPS"
+        ordering = ['-data_resposta']
+
+    def __str__(self):
+        return f"Nota {self.nota} de {self.paciente.nome_completo}"

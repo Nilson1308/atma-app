@@ -85,7 +85,6 @@ class Profissional(AbstractUser):
         return self.nome_completo or self.email
 
 
-# Modelo para o Paciente
 class Paciente(models.Model):
     """
     Modelo para armazenar os dados dos pacientes.
@@ -106,6 +105,7 @@ class Paciente(models.Model):
     cadastrado_por = models.ForeignKey(Profissional, on_delete=models.SET_NULL, null=True, blank=True, related_name='pacientes_cadastrados')
     data_cadastro = models.DateTimeField(auto_now_add=True)
     conversation_state = models.CharField(max_length=50, null=True, blank=True, help_text="Controla o estado da conversa com a IA")
+    onboarding_step = models.CharField(max_length=50, null=True, blank=True, help_text="Controla a etapa do onboarding do paciente via IA")
 
     def __str__(self):
         return self.nome_completo

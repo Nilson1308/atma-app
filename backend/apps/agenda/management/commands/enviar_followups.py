@@ -3,15 +3,14 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
 from apps.agenda.models import Agendamento
+from apps.agenda.views import responder_paciente_via_whatsapp # Reutiliza nossa função de envio
 
 class Command(BaseCommand):
-    help = 'Verifica agendamentos realizados no dia anterior e envia uma mensagem de follow-up.'
+    help = 'Verifica agendamentos realizados no dia anterior e envia uma mensagem de follow-up com NPS.'
 
     def handle(self, *args, **options):
-        # Define a data alvo como "ontem"
         data_alvo = timezone.localdate() - timedelta(days=1)
 
-        # Encontra agendamentos realizados ontem que ainda não receberam follow-up
         agendamentos_para_followup = Agendamento.objects.filter(
             status='Realizado',
             data_hora_inicio__date=data_alvo,
@@ -28,36 +27,32 @@ class Command(BaseCommand):
         sucessos = 0
         for agendamento in agendamentos_para_followup:
             paciente = agendamento.paciente
-            profissional = agendamento.profissional
             
             mensagem = f"""
-Olá, *{paciente.nome_completo}*!
+Olá, *{paciente.nome_completo.split(' ')[0]}*!
 
-Passando para saber como se sente após a nossa consulta de ontem. 
-Espero que esteja tudo bem!
+Espero que esteja tudo bem após nossa consulta de ontem.
 
-Se tiver alguma dúvida ou se algo novo surgir, não hesite em contactar.
+Para sempre melhorarmos nosso atendimento, você poderia nos dar uma nota? De 0 a 10, o quanto você nos recomendaria a um amigo ou familiar?
 
-Com os melhores cumprimentos,
-*{profissional.nome_completo}*
+Sua opinião é muito importante para nós!
 """
             
-            payload_simulado = {
-                'from': 'whatsapp:+14155238886',
-                'to': f'whatsapp:{paciente.contato_telefone}',
-                'body': mensagem.strip()
-            }
+            # Usamos a função de envio real/simulada que já criamos
+            enviado = responder_paciente_via_whatsapp(paciente.contato_telefone, mensagem.strip())
 
-            self.stdout.write("-" * 60)
-            self.stdout.write(self.style.SUCCESS(f'SIMULANDO ENVIO DE FOLLOW-UP para {paciente.contato_telefone}:'))
-            self.stdout.write(json.dumps(payload_simulado, indent=2, ensure_ascii=False))
-            self.stdout.write("-" * 60)
+            if enviado:
+                self.stdout.write(self.style.SUCCESS(f'Follow-up com NPS enviado para {paciente.nome_completo}'))
+                # --- ATUALIZAÇÃO IMPORTANTE ---
+                # Marcamos o paciente com um estado para que a IA saiba que a próxima resposta é a nota
+                paciente.conversation_state = f'AWAITING_NPS_{agendamento.id}'
+                paciente.save()
 
-            # Marca o follow-up como enviado para não enviar novamente
-            agendamento.follow_up_enviado = True
-            agendamento.save()
-            sucessos += 1
+                agendamento.follow_up_enviado = True
+                agendamento.save()
+                sucessos += 1
+            else:
+                 self.stdout.write(self.style.ERROR(f'Falha ao enviar follow-up para {paciente.nome_completo}'))
 
-        self.stdout.write(self.style.SUCCESS(f'Processo finalizado. {sucessos} follow-up(s) simulado(s) com sucesso.'))
 
-    
+        self.stdout.write(self.style.SUCCESS(f'Processo finalizado. {sucessos} follow-up(s) enviado(s) com sucesso.'))

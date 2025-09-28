@@ -1,10 +1,12 @@
+# backend/apps/agenda/management/commands/send_test_message.py
 import os
+import json
 from django.core.management.base import BaseCommand
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 
 class Command(BaseCommand):
-    help = 'Envia uma mensagem de teste direta via Twilio para diagnosticar problemas.'
+    help = 'Envia uma mensagem de TEMPLATE de teste via Twilio para diagnosticar problemas.'
 
     def add_arguments(self, parser):
         parser.add_argument('phone_number', type=str, help='O número de telefone de destino no formato 55119XXXXXXXX.')
@@ -23,17 +25,27 @@ class Command(BaseCommand):
         formatted_destination = f'whatsapp:+{destination_number}'
         formatted_from = f'whatsapp:{twilio_number}'
         
-        test_message = "Olá! Esta é uma mensagem de teste direto do Atma App. Se você recebeu isso, a comunicação com a Twilio está funcionando."
+        # Este é o SID do template "Your Twilio verification code is..."
+        # Ele é o mais básico e garantido de funcionar no Sandbox.
+        template_sid = 'HXb5b62575e6e4ff6129ad7c8efe1f983e' 
 
-        self.stdout.write(self.style.WARNING(f"Tentando enviar mensagem de '{formatted_from}' para '{formatted_destination}'..."))
+        # --- CORREÇÃO FINAL ---
+        # Este template espera uma variável {{1}}
+        # E a documentação da API exige que as variáveis sejam uma string JSON.
+        content_variables = json.dumps({
+            '1': '12345'
+        })
+
+        self.stdout.write(self.style.WARNING(f"Tentando enviar MENSAGEM DE TEMPLATE de '{formatted_from}' para '{formatted_destination}'..."))
 
         try:
             message = client.messages.create(
+                              content_sid=template_sid,
                               from_=formatted_from,
-                              body=test_message,
-                              to=formatted_destination
+                              to=formatted_destination,
+                              content_variables=content_variables
                           )
-            self.stdout.write(self.style.SUCCESS(f'Mensagem enviada com sucesso! SID: {message.sid}'))
+            self.stdout.write(self.style.SUCCESS(f'Mensagem de template enviada com sucesso! SID: {message.sid}'))
             self.stdout.write(self.style.SUCCESS('Verifique seu WhatsApp.'))
 
         except TwilioRestException as e:
