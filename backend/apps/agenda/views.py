@@ -2,6 +2,7 @@
 
 import os
 import traceback
+from google import genai
 from django.http import HttpResponse
 from django.utils import timezone
 from datetime import timedelta, datetime
@@ -11,7 +12,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
-import google.generativeai as genai
 from django.shortcuts import get_object_or_404
 from django.db.models import Sum
 import re
@@ -133,17 +133,13 @@ class WhatsAppWebhookView(APIView):
 
             conta = Conta.objects.get(whatsapp_number=destinatario_num)
             
-            paciente = Paciente.objects.filter(conta=conta, contato_telefone__contains=remetente_num).first()
-            is_new_contact = paciente is None
+            paciente, is_new_contact = Paciente.objects.get_or_create(
+                conta=conta, 
+                contato_telefone__contains=remetente_num,
+                defaults={'cadastrado_por': conta.proprietario, 'nome_completo': 'Novo Contato'}
+            )
 
             ai_manager = GeminiAIManager(profissional=conta.proprietario)
-
-            if is_new_contact:
-                paciente = Paciente.objects.create(
-                    conta=conta, 
-                    contato_telefone=remetente_num,
-                    cadastrado_por=conta.proprietario
-                )
 
             if paciente and paciente.conversation_state and paciente.conversation_state.startswith('AWAITING_NPS_'):
                 return self.handle_nps_response(paciente, corpo_mensagem_original)
@@ -172,6 +168,7 @@ class WhatsAppWebhookView(APIView):
             return Response({"status": "erro_geral", "mensagem": str(e)}, status=500)
 
     def handle_nps_response(self, paciente, corpo_mensagem):
+        # (Seu código original aqui, sem alterações)
         try:
             nota = int(re.search(r'\d+', corpo_mensagem).group())
             if 0 <= nota <= 10:
@@ -190,12 +187,12 @@ class WhatsAppWebhookView(APIView):
         return Response({"status": "nps_error"})
 
     def handle_lembrete_response(self, agendamento, resposta, ai_manager):
+        # (Seu código original aqui, sem alterações)
         if resposta == 'SIM':
             agendamento.status = 'Confirmado'
             agendamento.save()
             responder_paciente_via_whatsapp(agendamento.paciente.contato_telefone, "Obrigado por confirmar! Sua consulta está garantida.")
             return Response({"status": "confirmado"})
-        
         if resposta in ['NÃO', 'REAGENDAR']:
             agendamento.status = 'Cancelado'
             agendamento.save()
@@ -204,7 +201,9 @@ class WhatsAppWebhookView(APIView):
 
     def handle_onboarding(self, paciente, corpo_mensagem, ai_manager):
         if paciente.onboarding_step == 'AWAITING_NAME':
-            paciente.nome_completo = corpo_mensagem.strip()
+            # MELHORIA: Remove "Meu nome é" se o paciente incluir na resposta
+            nome_limpo = re.sub(r'^(meu nome é|me chamo)\s*', '', corpo_mensagem, flags=re.IGNORECASE).strip()
+            paciente.nome_completo = nome_limpo
             paciente.onboarding_step = 'AWAITING_DETAILS'
             paciente.save()
             resposta_ia = ai_manager.gerar_pergunta_onboarding(paciente.nome_completo.split(' ')[0])
@@ -250,51 +249,44 @@ class WhatsAppWebhookView(APIView):
             if horario_escolhido_utc:
                 Agendamento.objects.create(paciente=paciente, profissional=conta.proprietario, titulo="Consulta agendada pela IA", data_hora_inicio=horario_escolhido_utc, data_hora_fim=horario_escolhido_utc + timedelta(hours=1), status='Confirmado')
                 
-                if not paciente.nome_completo:
+                if not paciente.nome_completo or "Novo Contato" in paciente.nome_completo:
                     paciente.onboarding_step = 'AWAITING_NAME'
                     paciente.save()
                     resposta_ia = ai_manager.gerar_pergunta_nome_completo()
                 else:
-                    data_local_formatada = timezone.localtime(horario_escolhido_utc).strftime('%A, %d de %B às %H:%M')
+                    data_local_formatada = timezone.localtime(horario_escolhido_utc).strftime('%A, %d de %B às %H:%M').capitalize()
                     resposta_ia = f"Perfeito, {paciente.nome_completo.split(' ')[0]}! Seu agendamento para {data_local_formatada} está confirmado. Até lá!"
                 
                 responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
                 cache.delete(cache_key)
                 return Response({"status": "agendamento_criado"})
             else:
-                if horarios_oferecidos_cache:
-                    # --- LÓGICA FINAL CORRIGIDA AQUI ---
-                    horarios_formatados = [timezone.localtime(h).strftime('• %A, dia %d, às %H:%M') for h in horarios_oferecidos_cache]
-                    texto_horarios = "\n".join(horarios_formatados)
-                    resposta_ia = f"Desculpe, mas a opção que você mencionou não está na lista. Por favor, escolha um dos horários válidos abaixo:\n\n{texto_horarios}"
-                    responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
-                    return Response({"status": "horario_invalido_reenviado"})
-                else:
-                    intent = "AGENDAR_COM_PREFERENCIA"
+                # MELHORIA: Se não escolheu um horário válido, trata como uma nova preferência
+                intent = "AGENDAR_COM_PREFERENCIA"
 
         if intent == "AGENDAR_COM_PREFERENCIA":
             preferencias = ai_manager.extrair_preferencias(corpo_mensagem_original)
             horarios = ai_manager.encontrar_horarios_disponiveis(preferencias)
             cache.set(cache_key, horarios, 600)
-            nome_para_resposta = paciente.nome_completo.split(' ')[0] if paciente.nome_completo else "você"
+            nome_para_resposta = paciente.nome_completo.split(' ')[0] if paciente.nome_completo and "Novo Contato" not in paciente.nome_completo else "você"
             resposta_ia = ai_manager.gerar_resposta_com_horarios(nome_para_resposta, horarios)
             responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
             return Response({"status": "horarios_enviados"})
 
         elif intent == "AGENDAR":
-            nome_para_resposta = paciente.nome_completo.split(' ')[0] if paciente.nome_completo else "você"
+            nome_para_resposta = paciente.nome_completo.split(' ')[0] if paciente.nome_completo and "Novo Contato" not in paciente.nome_completo else "você"
             resposta_ia = ai_manager.gerar_pergunta_preferencia(nome_para_resposta)
             responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
             return Response({"status": "aguardando_preferencia"})
         
         elif intent == "SAUDACAO":
-            nome_para_resposta = paciente.nome_completo.split(' ')[0] if paciente.nome_completo else "você"
-            resposta_ia = f"Olá, {nome_para_resposta}, tudo bem? Sou a assistente virtual do(a) {conta.nome_conta}. Como posso te ajudar hoje?"
+            nome_para_resposta = paciente.nome_completo.split(' ')[0] if paciente.nome_completo and "Novo Contato" not in paciente.nome_completo else "tudo bem?"
+            resposta_ia = f"Olá, {nome_para_resposta}! Sou a assistente virtual do(a) {conta.nome_conta}. Como posso te ajudar hoje?"
             responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
             return Response({"status": "saudacao_respondida"})
 
         elif intent == "VERIFICAR_PENDENCIAS":
-            if not paciente.nome_completo:
+            if not paciente.nome_completo or "Novo Contato" in paciente.nome_completo:
                  resposta_ia = "Para verificar informações financeiras, primeiro preciso que você se identifique. Por favor, me informe seu nome completo."
                  paciente.onboarding_step = 'AWAITING_NAME'
                  paciente.save()
@@ -304,7 +296,7 @@ class WhatsAppWebhookView(APIView):
             return Response({"status": "pendencias_verificadas"})
 
         elif intent in ['solicitar_receita', 'solicitar_atestado', 'solicitar_recibo']:
-            if not paciente.nome_completo:
+            if not paciente.nome_completo or "Novo Contato" in paciente.nome_completo:
                 resposta_ia = "Para solicitar documentos, primeiro preciso que você se identifique. Por favor, me informe seu nome completo."
                 paciente.onboarding_step = 'AWAITING_NAME'
                 paciente.save()
@@ -313,7 +305,7 @@ class WhatsAppWebhookView(APIView):
             responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
             return Response({"status": "solicitacao_registrada"})
 
-        elif intent == "DESCONHEcido":
+        elif intent == "DESCONHECIDO":
             resposta_ia = "Não tenho certeza de como responder a isso. Deseja que eu encaminhe sua mensagem para um de nossos atendentes?"
             responder_paciente_via_whatsapp(paciente.contato_telefone, resposta_ia)
             return Response({"status": "encaminhado_humano"})
@@ -324,6 +316,7 @@ class WhatsAppWebhookView(APIView):
             return Response({"status": "faq_respondido"})
             
 class HorarioTrabalhoViewSet(viewsets.ModelViewSet):
+    # (Seu código original aqui, sem alterações)
     serializer_class = HorarioTrabalhoSerializer
     permission_classes = [permissions.IsAuthenticated]
     def get_queryset(self):
@@ -332,6 +325,7 @@ class HorarioTrabalhoViewSet(viewsets.ModelViewSet):
         serializer.save(profissional=self.request.user)
 
 class ExcecaoHorarioViewSet(viewsets.ModelViewSet):
+    # (Seu código original aqui, sem alterações)
     serializer_class = ExcecaoHorarioSerializer
     permission_classes = [permissions.IsAuthenticated]
     def get_queryset(self):

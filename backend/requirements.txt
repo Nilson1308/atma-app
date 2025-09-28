@@ -6,4 +6,4 @@ djangorestframework-simplejwt==5.3.1
 drf-nested-routers==0.93.4
 Pillow==10.3.0
 twilio==9.2.2
-google-generativeai==0.7.2
+google-genai
